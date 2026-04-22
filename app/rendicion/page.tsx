@@ -1,6 +1,8 @@
 import { getDb } from '@/lib/db';
 import RendicionUI from '@/components/RendicionUI';
 
+export const dynamic = 'force-dynamic';
+
 export default async function RendicionPage() {
   const db = await getDb();
 

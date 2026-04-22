@@ -1,6 +1,8 @@
 import { getDb } from '@/lib/db';
 import AlumnosUI from '@/components/AlumnosUI';
 
+export const dynamic = 'force-dynamic';
+
 export default async function AlumnosPage() {
   const db = await getDb();
 

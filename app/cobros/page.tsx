@@ -1,6 +1,8 @@
 import { getDb } from '@/lib/db';
 import CobrosUI from '@/components/CobrosUI';
 
+export const dynamic = 'force-dynamic';
+
 export default async function CobrosPage() {
   const db = await getDb();
 

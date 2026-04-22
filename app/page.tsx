@@ -1,29 +1,29 @@
 import { getDb } from '@/lib/db';
 import DashboardUI from '@/components/DashboardUI';
 
+export const dynamic = 'force-dynamic';
+
 export default async function DashboardPage() {
   const db = await getDb();
 
-  // 1. GLOBAL STATS
+  // 1. STATS
   const stats = await db.get(`
     SELECT 
-      (SELECT COUNT(*) FROM students) as total_students,
       (SELECT COALESCE(SUM(amount_paid), 0) FROM payments) as total_revenue,
-      (SELECT COUNT(*) FROM payments) as total_txs,
-      (SELECT COALESCE(SUM(grand_total), 0) FROM reconciliations) as total_reconciled
+      (SELECT COUNT(*) FROM payments) as total_payments,
+      (SELECT COALESCE(SUM(grand_total), 0) FROM reconciliations) as total_rendido,
+      (SELECT COUNT(*) FROM students WHERE status = 'ACTIVE') as total_students
   `);
 
   // 2. CATEGORIES
-  const categories = await db.all(
-    'SELECT category, COUNT(*) as count FROM students GROUP BY category ORDER BY count DESC'
-  );
+  const categories = await db.all('SELECT DISTINCT category FROM students');
 
-  // 3. ALL STUDENTS (for matrix)
+  // 3. STUDENTS
   const students = await db.all(`
-    SELECT id, name, category, group_name
-    FROM students
-    WHERE category IN ('INFANTIL', 'ESCUELA SD')
-    ORDER BY category, name
+    SELECT s.id, s.name, s.category, s.status,
+           (SELECT COALESCE(SUM(amount_paid), 0) FROM payments p WHERE p.student_id = s.id) as total_paid
+    FROM students s
+    ORDER BY s.name
   `);
 
   // 4. MONTHLY STATUSES
@@ -32,7 +32,6 @@ export default async function DashboardPage() {
   if (studentIds.length > 0) {
     statuses = await db.all(`
       SELECT student_id, month, status FROM monthly_status
-      WHERE student_id IN (${studentIds.join(',')})
     `);
   }
 
@@ -42,10 +41,10 @@ export default async function DashboardPage() {
     statusMap[s.student_id][s.month] = s.status;
   });
 
-  // 5. RECONCILIATION COMPARISON
+  // 5. RECENT RECONCILIATIONS
   const reconciliations = await db.all(`
-    SELECT r.date, r.grand_total as rendido, r.rubro,
-           (SELECT COALESCE(SUM(amount_paid), 0) FROM payments p WHERE p.payment_date = r.date) as cobrado
+    SELECT r.id, r.date, r.rubro, r.grand_total,
+           (SELECT COALESCE(SUM(amount_paid), 0) FROM payments p WHERE p.payment_date = r.date AND p.rubro = r.rubro) as cobrado
     FROM reconciliations r
     ORDER BY r.date DESC
     LIMIT 15
