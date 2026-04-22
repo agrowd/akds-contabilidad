@@ -26,7 +26,7 @@ async function syncMonthlyStatus(student_id: number, month_covered: string) {
     let requiredValue = 0;
 
     if (payments.length > 0) {
-        totalPaid = payments.reduce((sum, p) => sum + p.amount_paid, 0);
+        totalPaid = payments.reduce((sum: number, p: any) => sum + p.amount_paid, 0);
         requiredValue = payments[0].month_value; // Assume same value for the month
     }
 
@@ -217,7 +217,7 @@ export async function deletePayment(id: number) {
 export async function updateStudent(id: number, data: any) {
     const db = await getDb();
     try {
-        const fields = Object.keys(data).map(k => `${k} = ?`).join(', ');
+        const fields = Object.keys(data).map((k: string) => `${k} = ?`).join(', ');
         const values = [...Object.values(data), id];
         await db.run(`UPDATE students SET ${fields} WHERE id = ?`, values);
         revalidatePath('/alumnos');
