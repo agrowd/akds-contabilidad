@@ -41,9 +41,9 @@ export async function getDb() {
     };
   } else {
     if (!sqliteDb) {
-      // Dynamic imports to prevent Vercel from trying to bundle sqlite3 in production
-      const sqlite3 = (await import('sqlite3')).default;
-      const { open } = await import('sqlite');
+      // Use eval to completely bypass static analysis during Vercel build
+      const sqlite3 = (await eval('import("sqlite3")')).default;
+      const { open } = await eval('import("sqlite")');
       
       const dbPath = path.resolve(process.cwd(), 'akds.sqlite');
       sqliteDb = await open({
