@@ -27,7 +27,7 @@ export default async function DashboardPage() {
   `);
 
   // 4. MONTHLY STATUSES
-  const studentIds = students.map(s => s.id);
+  const studentIds = students.map((s: any) => s.id);
   let statuses: { student_id: number; month: string; status: string }[] = [];
   if (studentIds.length > 0) {
     statuses = await db.all(`
@@ -37,7 +37,7 @@ export default async function DashboardPage() {
   }
 
   const statusMap: Record<number, Record<string, string>> = {};
-  statuses.forEach(s => {
+  statuses.forEach((s: any) => {
     if (!statusMap[s.student_id]) statusMap[s.student_id] = {};
     statusMap[s.student_id][s.month] = s.status;
   });
