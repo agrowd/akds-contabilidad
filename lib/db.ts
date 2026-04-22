@@ -4,10 +4,15 @@ import path from 'path';
 let sqliteDb: any = null;
 let postgresPool: VercelPool | null = null;
 
-const isProd = !!process.env.POSTGRES_URL;
+// Ensure we check for the environment variable correctly
+const isProd = process.env.POSTGRES_URL || process.env.VERCEL_ENV;
 
 export async function getDb() {
   if (isProd) {
+    if (!process.env.POSTGRES_URL) {
+        throw new Error('POSTGRES_URL is missing in production environment. Please connect Vercel Postgres in the Storage tab.');
+    }
+
     if (!postgresPool) {
       postgresPool = createPool({
         connectionString: process.env.POSTGRES_URL
@@ -41,9 +46,11 @@ export async function getDb() {
     };
   } else {
     if (!sqliteDb) {
-      // Use eval to completely bypass static analysis during Vercel build
-      const sqlite3 = (await eval('import("sqlite3")')).default;
-      const { open } = await eval('import("sqlite")');
+      // String-based dynamic import to avoid bundling issues in production
+      const sqlite3Module = 'sqlite3';
+      const sqliteModule = 'sqlite';
+      const sqlite3 = (await import(sqlite3Module)).default;
+      const { open } = await import(sqliteModule);
       
       const dbPath = path.resolve(process.cwd(), 'akds.sqlite');
       sqliteDb = await open({
