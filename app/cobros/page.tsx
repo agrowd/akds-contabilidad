@@ -42,8 +42,8 @@ export default async function CobrosPage() {
   `);
 
   // Unique rubros and methods for filters
-  const rubros = await db.all('SELECT DISTINCT rubro FROM payments WHERE rubro != "" ORDER BY rubro');
-  const methods = await db.all('SELECT DISTINCT method FROM payments WHERE method != "" ORDER BY method');
+  const rubros = await db.all("SELECT DISTINCT rubro FROM payments WHERE rubro != '' ORDER BY rubro");
+  const methods = await db.all("SELECT DISTINCT method FROM payments WHERE method != '' ORDER BY method");
 
   return (
     <CobrosUI
