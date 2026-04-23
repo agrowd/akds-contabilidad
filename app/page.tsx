@@ -16,7 +16,13 @@ export default async function DashboardPage() {
   `);
 
   // 2. CATEGORIES
-  const categories = await db.all('SELECT DISTINCT category FROM students');
+  const categories = await db.all(`
+    SELECT category, COUNT(*) as count 
+    FROM students 
+    WHERE status = 'ACTIVE' 
+    GROUP BY category
+    ORDER BY count DESC
+  `);
 
   // 3. STUDENTS
   const students = await db.all(`

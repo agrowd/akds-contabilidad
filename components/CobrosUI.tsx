@@ -3,7 +3,7 @@
 import React, { useState, useMemo } from 'react';
 import EditPaymentModal from './EditPaymentModal';
 import { deletePayment } from '@/lib/actions';
-
+import { exportToExcel, exportToPDF } from '@/lib/export';
 interface Payment {
   id: number;
   student_id: number;
@@ -51,6 +51,7 @@ export default function CobrosUI({ payments, stats, monthlySummary, rubros, meth
   const [rubroFilter, setRubroFilter] = useState('ALL');
   const [methodFilter, setMethodFilter] = useState('ALL');
   const [estadoFilter, setEstadoFilter] = useState('ALL');
+  const [monthFilter, setMonthFilter] = useState('ALL');
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
@@ -63,8 +64,9 @@ export default function CobrosUI({ payments, stats, monthlySummary, rubros, meth
     if (rubroFilter !== 'ALL') result = result.filter(p => p.rubro === rubroFilter);
     if (methodFilter !== 'ALL') result = result.filter(p => p.method === methodFilter);
     if (estadoFilter !== 'ALL') result = result.filter(p => p.estado === estadoFilter);
+    if (monthFilter !== 'ALL') result = result.filter(p => p.month_covered === monthFilter);
     return result;
-  }, [payments, search, rubroFilter, methodFilter, estadoFilter]);
+  }, [payments, search, rubroFilter, methodFilter, estadoFilter, monthFilter]);
 
   const filteredTotal = filtered.reduce((sum, p) => sum + p.amount_paid, 0);
 
@@ -77,6 +79,40 @@ export default function CobrosUI({ payments, stats, monthlySummary, rubros, meth
   const handleEdit = (payment: Payment) => {
       setEditingPayment(payment);
       setIsEditModalOpen(true);
+  };
+
+  const handleExportExcel = () => {
+    const data = filtered.map(p => ({
+      ID: p.id,
+      Alumno: p.student_name,
+      Categoría: p.category,
+      Fecha: p.payment_date,
+      Mes: p.month_covered,
+      Monto: p.amount_paid,
+      ValorCuota: p.month_value,
+      Estado: p.estado,
+      Rubro: p.rubro,
+      Método: p.method,
+      Recibo: p.receipt,
+      Saldo: p.balance,
+      Demora: p.delay_days,
+      Info: p.info
+    }));
+    exportToExcel(data, `Cobros_${new Date().toISOString().split('T')[0]}`);
+  };
+
+  const handleExportPDF = () => {
+    const columns = [
+      { header: 'Fecha', dataKey: 'payment_date' },
+      { header: 'Alumno', dataKey: 'student_name' },
+      { header: 'Rubro', dataKey: 'rubro' },
+      { header: 'Mes', dataKey: 'month_covered' },
+      { header: 'Monto', dataKey: 'amount_paid' },
+      { header: 'Método', dataKey: 'method' },
+      { header: 'Estado', dataKey: 'estado' },
+      { header: 'Saldo', dataKey: 'balance' }
+    ];
+    exportToPDF(filtered, `Cobros_${new Date().toISOString().split('T')[0]}`, 'Reporte de Cobros', columns);
   };
 
   // Build monthly summary matrix
@@ -147,8 +183,20 @@ export default function CobrosUI({ payments, stats, monthlySummary, rubros, meth
           <option value="ABONADA">Abonada</option>
           <option value="PENDIENTE">Pendiente</option>
         </select>
+        <select className="filter-select" value={monthFilter} onChange={e => setMonthFilter(e.target.value)}>
+          <option value="ALL">Todos los meses</option>
+          {MONTHS_ORDER.map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <div style={{ display: 'flex', gap: '0.5rem', marginLeft: 'auto' }}>
+          <button onClick={handleExportExcel} className="btn" style={{ background: '#217346', color: 'white', border: 'none', padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}>
+            📊 Excel
+          </button>
+          <button onClick={handleExportPDF} className="btn" style={{ background: '#e74c3c', color: 'white', border: 'none', padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}>
+            📄 PDF
+          </button>
+        </div>
         <span className="filter-count">
-          {filtered.length} cobros · Subtotal: ${filteredTotal.toLocaleString()}
+          {filtered.length} cobros · Subtotal: ${(filteredTotal || 0).toLocaleString()}
         </span>
       </div>
 

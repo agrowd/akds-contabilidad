@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
+import { exportToExcel, exportToPDF } from '@/lib/export';
 
 interface Reconciliation {
   id: number;
@@ -38,13 +39,42 @@ interface RendicionUIProps {
 
 export default function RendicionUI({ reconciliations, stats, staffPayments, staffStats }: RendicionUIProps) {
   const [rubroFilter, setRubroFilter] = useState('ALL');
+  const [monthFilter, setMonthFilter] = useState('ALL');
 
   const rubros = [...new Set(reconciliations.map(r => r.rubro))];
 
+  const months = [...new Set(reconciliations.map(r => r.date ? r.date.substring(0, 7) : ''))].filter(Boolean).sort().reverse();
+
   const filtered = useMemo(() => {
-    if (rubroFilter === 'ALL') return reconciliations;
-    return reconciliations.filter(r => r.rubro === rubroFilter);
-  }, [reconciliations, rubroFilter]);
+    let res = reconciliations;
+    if (rubroFilter !== 'ALL') res = res.filter(r => r.rubro === rubroFilter);
+    if (monthFilter !== 'ALL') res = res.filter(r => r.date && r.date.startsWith(monthFilter));
+    return res;
+  }, [reconciliations, rubroFilter, monthFilter]);
+
+  const handleExportExcel = () => {
+    const data = filtered.map(r => ({
+      ID: r.id,
+      Fecha: r.date,
+      Rubro: r.rubro,
+      Pagos: r.payment_count,
+      RendidoBanco: r.grand_total,
+      CobroReal: r.cobrado,
+      Diferencia: r.cobrado - r.grand_total
+    }));
+    exportToExcel(data, `Rendiciones_${new Date().toISOString().split('T')[0]}`);
+  };
+
+  const handleExportPDF = () => {
+    const columns = [
+      { header: 'Fecha', dataKey: 'date' },
+      { header: 'Rubro', dataKey: 'rubro' },
+      { header: 'Pagos', dataKey: 'payment_count' },
+      { header: 'Rendido Bank', dataKey: 'grand_total' },
+      { header: 'Cobro Real', dataKey: 'cobrado' },
+    ];
+    exportToPDF(filtered, `Rendiciones_${new Date().toISOString().split('T')[0]}`, 'Reporte de Rendición', columns);
+  };
 
   const filteredTotal = filtered.reduce((sum, r) => sum + r.grand_total, 0);
   const totalCobrado = filtered.reduce((sum, r) => sum + r.cobrado, 0);
@@ -118,7 +148,19 @@ export default function RendicionUI({ reconciliations, stats, staffPayments, sta
           <option value="ALL">Todos los rubros</option>
           {rubros.map(r => <option key={r} value={r}>{r}</option>)}
         </select>
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+        <select className="filter-select" value={monthFilter} onChange={e => setMonthFilter(e.target.value)}>
+          <option value="ALL">Todos los meses</option>
+          {months.map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <div style={{ display: 'flex', gap: '0.5rem', marginLeft: 'auto' }}>
+          <button onClick={handleExportExcel} className="btn" style={{ background: '#217346', color: 'white', border: 'none', padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}>
+            📊 Excel
+          </button>
+          <button onClick={handleExportPDF} className="btn" style={{ background: '#e74c3c', color: 'white', border: 'none', padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}>
+            📄 PDF
+          </button>
+        </div>
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginLeft: '1rem' }}>
           <span className="filter-count">
             {filtered.length} cierres · Rendido: <strong>${filteredTotal.toLocaleString()}</strong>
           </span>

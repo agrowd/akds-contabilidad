@@ -5,6 +5,7 @@ import AddStudentModal from './AddStudentModal';
 import AddPaymentModal from './AddPaymentModal';
 import EditPaymentModal from './EditPaymentModal';
 import { deleteStudent, deletePayment } from '@/lib/actions';
+import { exportToExcel, exportToPDF } from '@/lib/export';
 
 interface Student {
   id: number;
@@ -118,6 +119,38 @@ export default function AlumnosUI({ students, statusMap, paymentsByStudent, cate
     return result;
   }, [students, search, categoryFilter]);
 
+  const handleExportExcel = () => {
+    const data = filtered.map(s => ({
+      ID: s.id,
+      Nombre: s.name,
+      Categoría: s.category,
+      Grupo: s.group_name,
+      Estado: s.status,
+      Teléfono: s.phone,
+      CuotaMensual: s.monthly_quota,
+      PagosRegistrados: s.payment_count || 0,
+      TotalAbonado: s.total_paid || 0,
+      SaldoPendiente: s.total_balance || 0,
+      MesesPagos: s.months_paid || 0,
+      MesesImpagos: s.months_unpaid || 0,
+      Notas: s.notes
+    }));
+    exportToExcel(data, `Alumnos_${new Date().toISOString().split('T')[0]}`);
+  };
+
+  const handleExportPDF = () => {
+    const columns = [
+      { header: 'ID', dataKey: 'id' },
+      { header: 'Nombre', dataKey: 'name' },
+      { header: 'Categoría', dataKey: 'category' },
+      { header: 'Estado', dataKey: 'status' },
+      { header: 'Pagos', dataKey: 'payment_count' },
+      { header: 'Monto Total', dataKey: 'total_paid' },
+      { header: 'Meses Impagos', dataKey: 'months_unpaid' }
+    ];
+    exportToPDF(filtered, `Alumnos_${new Date().toISOString().split('T')[0]}`, 'Reporte de Alumnos', columns);
+  };
+
   const selected = selectedStudent ? students.find(s => s.id === selectedStudent) : null;
   const selectedPayments = selectedStudent ? (paymentsByStudent[selectedStudent] || []) : [];
   const selectedStatus = selectedStudent ? (statusMap[selectedStudent] || {}) : {};
@@ -155,7 +188,15 @@ export default function AlumnosUI({ students, statusMap, paymentsByStudent, cate
             <option key={c} value={c}>{c}</option>
           ))}
         </select>
-        <span className="filter-count">
+        <div style={{ display: 'flex', gap: '0.5rem', marginLeft: 'auto' }}>
+          <button onClick={handleExportExcel} className="btn" style={{ background: '#217346', color: 'white', border: 'none', padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}>
+            📊 Excel
+          </button>
+          <button onClick={handleExportPDF} className="btn" style={{ background: '#e74c3c', color: 'white', border: 'none', padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}>
+            📄 PDF
+          </button>
+        </div>
+        <span className="filter-count" style={{ marginLeft: '1rem' }}>
           {filtered.length} de {students.length} alumnos
         </span>
         <button 
