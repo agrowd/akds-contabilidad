@@ -60,7 +60,7 @@ export default async function DashboardPage() {
     LEFT JOIN monthly_status ms ON s.id = ms.student_id
     WHERE s.category IN ('INFANTIL', 'ESCUELA SD')
     GROUP BY s.id
-    HAVING unpaid_months > 0
+    HAVING COUNT(CASE WHEN ms.status = 'UNPAID' THEN 1 END) > 0
     ORDER BY unpaid_months DESC
     LIMIT 10
   `);
