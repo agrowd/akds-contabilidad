@@ -11,15 +11,19 @@ const MONTHS = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO',
  */
 async function syncMonthlyStatus(student_id: number, month_covered: string) {
     const db = await getDb();
-    const parts = month_covered.split('-');
+    const parts = month_covered.split('-'); // e.g. "2026-03" or "2026-03-01"
+    const year = parts[0];
     const monthIdx = parseInt(parts[1]) - 1;
     const monthName = MONTHS[monthIdx];
+
+    const student = await db.get(`SELECT status FROM students WHERE id = ?`, [student_id]);
+    const isSuspended = student?.status === 'SUSPENDIDO';
 
     // Get all payments for this student and this specific month
     const payments = await db.all(
         `SELECT amount_paid, month_value FROM payments 
-         WHERE student_id = ? AND month_covered = ?`,
-        [student_id, month_covered]
+         WHERE student_id = ? AND month_covered LIKE ?`,
+        [student_id, `${year}-${parts[1]}%`]
     );
 
     let totalPaid = 0;
@@ -30,19 +34,36 @@ async function syncMonthlyStatus(student_id: number, month_covered: string) {
         requiredValue = payments[0].month_value; // Assume same value for the month
     }
 
-    const newStatus = totalPaid >= requiredValue && requiredValue > 0 ? 'PAID' : totalPaid > 0 ? 'PARTIAL' : 'UNPAID';
+    let newStatus = 'UNPAID';
+    if (totalPaid >= requiredValue && requiredValue > 0) newStatus = 'PAID';
+    else if (totalPaid > 0) newStatus = 'PARTIAL';
+    else if (isSuspended) newStatus = 'SUSPENDIDO';
 
     await db.run(
-        `INSERT INTO monthly_status (student_id, month, status) 
-         VALUES (?, ?, ?)
-         ON CONFLICT(student_id, month) DO UPDATE SET status = ?`,
-        [student_id, monthName, newStatus, newStatus]
+        `INSERT INTO monthly_status (student_id, year, month, status) 
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(student_id, year, month) DO UPDATE SET status = ?`,
+        [student_id, year, monthName, newStatus, newStatus]
     );
 }
 
-/**
- * Adds a new student and initializes their monthly status as UNPAID.
- */
+export async function toggleMonthPayment(student_id: number, year: string, month: string, newStatus: string) {
+    const db = await getDb();
+    try {
+        await db.run(
+            `INSERT INTO monthly_status (student_id, year, month, status) 
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(student_id, year, month) DO UPDATE SET status = ?`,
+            [student_id, year, month, newStatus, newStatus]
+        );
+        revalidatePath('/alumnos');
+        return { success: true };
+    } catch (error: any) {
+        console.error('Error toggling month:', error);
+        return { success: false, error: error.message };
+    }
+}
+
 export async function addStudent(formData: {
   name: string;
   category: string;
@@ -52,29 +73,41 @@ export async function addStudent(formData: {
   notes?: string;
   monthly_quota?: number;
   phone?: string;
+  enrollment_date?: string; // YYYY-MM-DD
+  status?: string;
 }) {
   const db = await getDb();
-  const { name, category, group_name, gender, team, notes, monthly_quota, phone } = formData;
+  const { name, category, group_name, gender, team, notes, monthly_quota, phone, enrollment_date, status } = formData;
+
+  const finalStatus = status || 'ACTIVE';
+  const finalEnrollment = enrollment_date || new Date().toISOString().split('T')[0];
 
   try {
     const result = await db.run(
-      `INSERT INTO students (name, category, group_name, gender, team, status, notes, monthly_quota, phone) 
-       VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?)`,
+      `INSERT INTO students (name, category, group_name, gender, team, status, notes, monthly_quota, phone, enrollment_date) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
           name.toUpperCase(), category, group_name || '', gender || null, 
-          team || null, notes || '', monthly_quota || 0, phone || ''
+          team || null, finalStatus, notes || '', monthly_quota || 0, phone || '', finalEnrollment
       ]
     );
 
     const studentId = result.lastID;
 
-    // Initialize monthly status for the year as UNPAID (current month and back to January)
+    // Initialize monthly status for the year from enrollment month to current month
+    const enrollDate = new Date(finalEnrollment);
+    const enrollMonthIdx = enrollDate.getMonth();
+    const enrollYear = enrollDate.getFullYear().toString();
     const currentMonthIdx = new Date().getMonth();
-    for (let i = 0; i <= currentMonthIdx; i++) {
-        await db.run(
-            `INSERT INTO monthly_status (student_id, month, status) VALUES (?, ?, ?)`,
-            [studentId, MONTHS[i], 'UNPAID']
-        );
+    
+    // Only add months if they are in the same year, and start from enrollment month
+    if (new Date().getFullYear() === enrollDate.getFullYear()) {
+        for (let i = enrollMonthIdx; i <= currentMonthIdx; i++) {
+            await db.run(
+                `INSERT INTO monthly_status (student_id, year, month, status) VALUES (?, ?, ?, ?)`,
+                [studentId, enrollYear, MONTHS[i], finalStatus === 'SUSPENDIDO' ? 'SUSPENDIDO' : 'UNPAID']
+            );
+        }
     }
 
     revalidatePath('/alumnos');

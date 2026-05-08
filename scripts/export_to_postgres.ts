@@ -22,28 +22,24 @@ async function migrate() {
     };
 
     try {
-        // 1. Students
-        console.log(' - Moving students...');
-        const students = await dbSqlite.all('SELECT * FROM students');
-        for (const s of students) {
-            await dbPostgres.query(q(`INSERT INTO students (id, name, category, group_name, gender, team, status, notes, monthly_quota, phone) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT (id) DO NOTHING`), 
-                [s.id, s.name, s.category, s.group_name, s.gender, s.team, s.status, s.notes, s.monthly_quota, s.phone]);
+        // 1. Students (Skipped)
+        // 2. Payments (Skipped)
+        // 3. Monthly Status (Skipped)
+
+        // 4. Reconciliations
+        console.log(' - Moving reconciliations...');
+        const reconciliations = await dbSqlite.all('SELECT * FROM reconciliations');
+        for (const r of reconciliations) {
+            await dbPostgres.query(q(`INSERT INTO reconciliations (id, date, payment_count, rubro, cash_total, transfer_total, grand_total, cobrado) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT (id) DO NOTHING`), 
+                [r.id, r.date, r.payment_count, r.rubro, r.cash_total, r.transfer_total, r.grand_total, r.cobrado]);
         }
 
-        // 2. Payments
-        console.log(' - Moving payments...');
-        const payments = await dbSqlite.all('SELECT * FROM payments');
-        for (const p of payments) {
-            await dbPostgres.query(q(`INSERT INTO payments (id, student_id, payment_date, month_covered, amount_paid, month_value, estado, rubro, method, receipt, due_date, balance, delay_days, info) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (id) DO NOTHING`), 
-                [p.id, p.student_id, p.payment_date, p.month_covered, p.amount_paid, p.month_value, p.estado, p.rubro, p.method, p.receipt, p.due_date, p.balance, p.delay_days, p.info]);
-        }
-
-        // 3. Monthly Status
-        console.log(' - Moving monthly status...');
-        const statuses = await dbSqlite.all('SELECT * FROM monthly_status');
-        for (const st of statuses) {
-            await dbPostgres.query(q(`INSERT INTO monthly_status (student_id, month, status) VALUES (?,?,?) ON CONFLICT (student_id, month) DO NOTHING`), 
-                [st.student_id, st.month, st.status]);
+        // 5. Monthly Summary
+        console.log(' - Moving monthly summary...');
+        const summaries = await dbSqlite.all('SELECT * FROM monthly_summary');
+        for (const s of summaries) {
+            await dbPostgres.query(q(`INSERT INTO monthly_summary (month, rubro, total) VALUES (?,?,?) ON CONFLICT (rubro, month) DO NOTHING`), 
+                [s.month, s.rubro, s.total]);
         }
 
         console.log('✅ Migration complete!');

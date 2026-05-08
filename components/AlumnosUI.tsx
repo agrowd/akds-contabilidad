@@ -4,7 +4,7 @@ import React, { useState, useMemo } from 'react';
 import AddStudentModal from './AddStudentModal';
 import AddPaymentModal from './AddPaymentModal';
 import EditPaymentModal from './EditPaymentModal';
-import { deleteStudent, deletePayment } from '@/lib/actions';
+import { deleteStudent, deletePayment, updateStudent, toggleMonthPayment } from '@/lib/actions';
 import { exportToExcel, exportToPDF } from '@/lib/export';
 
 interface Student {
@@ -24,6 +24,7 @@ interface Student {
   months_paid: number;
   months_unpaid: number;
   months_partial: number;
+  enrollment_date: string;
 }
 
 interface Payment {
@@ -55,6 +56,7 @@ const MONTHS = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO',
 export default function AlumnosUI({ students, statusMap, paymentsByStudent, categories }: AlumnosUIProps) {
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState('ACTIVE');
   const [selectedStudent, setSelectedStudent] = useState<number | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -89,6 +91,38 @@ export default function AlumnosUI({ students, statusMap, paymentsByStudent, cate
       setIsEditPaymentModalOpen(true);
   };
 
+  const handleToggleMonth = async (studentId: number, month: string, currentStatus: string) => {
+      if (currentStatus === 'SUSPENDIDO') return; // Cannot toggle suspended months
+      
+      const nextStatusMap: Record<string, string> = {
+          'UNPAID': 'PAID',
+          'PAID': 'PARTIAL',
+          'PARTIAL': 'UNPAID',
+          'MOROSO': 'PAID' // Pseudo-status from UI maps to UNPAID in DB
+      };
+      
+      let actualCurrent = currentStatus;
+      if (currentStatus === 'MOROSO') actualCurrent = 'UNPAID';
+
+      const newStatus = nextStatusMap[actualCurrent] || 'PAID';
+      const currentYear = new Date().getFullYear().toString();
+      
+      const result = await toggleMonthPayment(studentId, currentYear, month, newStatus);
+      if (!result.success) {
+          alert('Error al actualizar: ' + result.error);
+      }
+  };
+
+  const handleToggleSuspend = async (student: Student) => {
+      const newStatus = student.status === 'SUSPENDIDO' ? 'ACTIVE' : 'SUSPENDIDO';
+      if (!confirm(`¿Estás seguro de que deseas cambiar el estado de ${student.name} a ${newStatus}?`)) return;
+      
+      const result = await updateStudent(student.id, { status: newStatus });
+      if (!result.success) {
+          alert('Error: ' + result.error);
+      }
+  };
+
   const handleWhatsApp = (student: Student) => {
       const pendingMonths = MONTHS.filter(m => (statusMap[student.id] || {})[m] === 'UNPAID' || (statusMap[student.id] || {})[m] === 'PARTIAL');
       if (pendingMonths.length === 0) {
@@ -116,8 +150,11 @@ export default function AlumnosUI({ students, statusMap, paymentsByStudent, cate
     if (categoryFilter !== 'ALL') {
       result = result.filter(s => s.category === categoryFilter);
     }
+    if (statusFilter !== 'ALL') {
+      result = result.filter(s => s.status === statusFilter);
+    }
     return result;
-  }, [students, search, categoryFilter]);
+  }, [students, search, categoryFilter, statusFilter]);
 
   const handleExportExcel = () => {
     const data = filtered.map(s => ({
@@ -187,6 +224,16 @@ export default function AlumnosUI({ students, statusMap, paymentsByStudent, cate
           {categories.map(c => (
             <option key={c} value={c}>{c}</option>
           ))}
+        </select>
+        <select
+          className="filter-select"
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+          style={{ marginLeft: '0.5rem' }}
+        >
+          <option value="ACTIVE">Activos</option>
+          <option value="SUSPENDIDO">Suspendidos</option>
+          <option value="ALL">Todos los Estados</option>
         </select>
         <div style={{ display: 'flex', gap: '0.5rem', marginLeft: 'auto' }}>
           <button onClick={handleExportExcel} className="btn" style={{ background: '#217346', color: 'white', border: 'none', padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}>
@@ -258,13 +305,15 @@ export default function AlumnosUI({ students, statusMap, paymentsByStudent, cate
                       {s.total_paid > 0 ? `$${(s.total_paid || 0).toLocaleString()}` : '-'}
                     </td>
                     <td className="text-center">
-                      {s.months_unpaid > 2
-                        ? <span className="badge badge-danger">Moroso</span>
-                        : s.months_unpaid > 0
-                          ? <span className="badge badge-warning">Pendiente</span>
-                          : s.payment_count > 0
-                            ? <span className="badge badge-success">Al día</span>
-                            : <span className="badge badge-secondary">Sin datos</span>
+                      {s.status === 'SUSPENDIDO' 
+                        ? <span className="badge badge-secondary">Suspendido</span>
+                        : s.months_unpaid > 2
+                          ? <span className="badge badge-danger">Moroso</span>
+                          : s.months_unpaid > 0
+                            ? <span className="badge badge-warning">Pendiente</span>
+                            : s.payment_count > 0
+                              ? <span className="badge badge-success">Al día</span>
+                              : <span className="badge badge-secondary">Sin datos</span>
                       }
                     </td>
                   </tr>
@@ -308,6 +357,19 @@ export default function AlumnosUI({ students, statusMap, paymentsByStudent, cate
                     📱 Notificar Deuda
                   </button>
                   <button 
+                    className="btn glass-hover" 
+                    style={{ 
+                        fontSize: '0.75rem', 
+                        padding: '0.4rem 0.8rem', 
+                        background: selected.status === 'SUSPENDIDO' ? 'rgba(0, 210, 255, 0.1)' : 'rgba(255, 170, 0, 0.1)', 
+                        borderColor: selected.status === 'SUSPENDIDO' ? 'rgba(0, 210, 255, 0.3)' : 'rgba(255, 170, 0, 0.3)',
+                        color: selected.status === 'SUSPENDIDO' ? '#00d2ff' : '#ffaa00'
+                    }}
+                    onClick={() => handleToggleSuspend(selected)}
+                  >
+                    {selected.status === 'SUSPENDIDO' ? '▶️ Reactivar' : '⏸️ Suspender'}
+                  </button>
+                  <button 
                     className="btn btn-secondary glass-hover" 
                     style={{ 
                       fontSize: '0.75rem', 
@@ -349,6 +411,12 @@ export default function AlumnosUI({ students, statusMap, paymentsByStudent, cate
                   {avgDelay} d
                 </span>
               </div>
+              <div className="detail-item glass" style={{ padding: '0.75rem', textAlign: 'center' }}>
+                <span className="detail-label" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.2rem' }}>Mes Inicio</span>
+                <span className="detail-value text-secondary" style={{ fontWeight: 700 }}>
+                  {selected.enrollment_date ? selected.enrollment_date.substring(0, 7) : '-'}
+                </span>
+              </div>
             </div>
 
             {/* MONTHLY MATRIX (for this student) */}
@@ -356,17 +424,53 @@ export default function AlumnosUI({ students, statusMap, paymentsByStudent, cate
               <h4 style={{ fontSize: '0.82rem', fontWeight: 700, marginBottom: '0.6rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                 Estado Mensual (Vencimiento: día 10)
               </h4>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '0.3rem' }}>
-                {MONTHS.map(m => {
-                  const st = selectedStatus[m] || 'UNPAID';
-                  const cls = st === 'PAID' ? 'status-paid' : st === 'PARTIAL' ? 'status-partial' : 'status-unpaid';
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '0.3rem' }}>
+                {/* FICHAJE BOX */}
+                <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginBottom: '0.2rem', fontWeight: 700 }}>
+                    FICHAJE
+                    </div>
+                    <div 
+                    className={`matrix-cell ${selectedStatus['FICHAJE'] === 'PAID' ? 'status-paid' : 'status-unpaid'}`} 
+                    style={{ width: '100%', height: '28px', cursor: 'pointer', userSelect: 'none', border: '2px solid rgba(255, 255, 255, 0.1)' }}
+                    onClick={() => handleToggleMonth(selected.id, 'FICHAJE', selectedStatus['FICHAJE'] || 'UNPAID')}
+                    title={`Click para cambiar estado (Actual: ${selectedStatus['FICHAJE'] || 'UNPAID'})`}
+                    >
+                    {selectedStatus['FICHAJE'] === 'PAID' ? '✓' : '✗'}
+                    </div>
+                </div>
+
+                {MONTHS.map((m, idx) => {
+                  const currentMonth = new Date().getMonth();
+                  const currentDay = new Date().getDate();
+                  const st = selectedStatus[m];
+                  let displayStatus = st || 'UNPAID';
+                  
+                  // Compute dynamic MOROSO
+                  if (displayStatus === 'UNPAID' && selected.status !== 'SUSPENDIDO') {
+                     if (currentMonth > idx || (currentMonth === idx && currentDay > 10)) {
+                         displayStatus = 'MOROSO';
+                     }
+                  }
+
+                  const cls = displayStatus === 'PAID' ? 'status-paid' 
+                            : displayStatus === 'PARTIAL' ? 'status-partial' 
+                            : displayStatus === 'MOROSO' ? 'status-danger'
+                            : displayStatus === 'SUSPENDIDO' ? 'status-suspended'
+                            : 'status-unpaid';
+                            
                   return (
                     <div key={m} style={{ textAlign: 'center' }}>
                       <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>
                         {m.substring(0, 3)}
                       </div>
-                      <div className={`matrix-cell ${cls}`} style={{ width: '100%', height: '28px' }}>
-                        {st === 'PAID' ? '✓' : st === 'PARTIAL' ? '~' : '✗'}
+                      <div 
+                        className={`matrix-cell ${cls}`} 
+                        style={{ width: '100%', height: '28px', cursor: 'pointer', userSelect: 'none' }}
+                        onClick={() => handleToggleMonth(selected.id, m, displayStatus)}
+                        title={`Click para cambiar estado (Actual: ${displayStatus})`}
+                      >
+                        {displayStatus === 'PAID' ? '✓' : displayStatus === 'PARTIAL' ? '~' : displayStatus === 'SUSPENDIDO' ? '⏸' : '✗'}
                       </div>
                     </div>
                   );

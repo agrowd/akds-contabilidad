@@ -19,7 +19,8 @@ export default function AddStudentModal({ isOpen, onClose, categories }: AddStud
     team: '',
     notes: '',
     monthly_quota: '',
-    phone: ''
+    phone: '',
+    enrollment_date: ''
   });
 
   if (!isOpen) return null;
@@ -31,7 +32,7 @@ export default function AddStudentModal({ isOpen, onClose, categories }: AddStud
     // Default category if not selected
     const data = { 
       ...formData, 
-      category: formData.category || (categories[0] || 'OTROS'),
+      category: formData.category || 'Infantil',
       monthly_quota: formData.monthly_quota ? parseFloat(formData.monthly_quota) : 0
     };
     
@@ -41,7 +42,7 @@ export default function AddStudentModal({ isOpen, onClose, categories }: AddStud
     if (result.success) {
       onClose();
       // Reset form
-      setFormData({ name: '', category: '', group_name: '', gender: '', team: '', notes: '', monthly_quota: '', phone: '' });
+      setFormData({ name: '', category: '', group_name: '', gender: '', team: '', notes: '', monthly_quota: '', phone: '', enrollment_date: '' });
     } else {
       alert('Error al guardar: ' + result.error);
     }
@@ -87,10 +88,9 @@ export default function AddStudentModal({ isOpen, onClose, categories }: AddStud
                   required
                 >
                   <option value="">Seleccionar...</option>
-                  {categories.map(c => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                  <option value="OTROS">OTROS</option>
+                  <option value="Infantil">Infantil</option>
+                  <option value="Andar FC Adultos">Andar FC Adultos</option>
+                  <option value="Sindrome de Down">Sindrome de Down</option>
                 </select>
               </div>
               <div className="form-group animate-in animate-in-delay-2">
@@ -146,6 +146,17 @@ export default function AddStudentModal({ isOpen, onClose, categories }: AddStud
                 />
               </div>
               <div className="form-group animate-in animate-in-delay-3">
+                <label className="form-label">Mes de Inicio (Inscripción)</label>
+                <input 
+                  type="date" 
+                  name="enrollment_date" 
+                  className="form-input" 
+                  value={formData.enrollment_date}
+                  onChange={handleChange}
+                  required
+                />
+              </div>
+              <div className="form-group animate-in animate-in-delay-3">
                 <label className="form-label">Cuota Sugerida ($)</label>
                 <input 
                   type="number" 
@@ -182,7 +193,7 @@ export default function AddStudentModal({ isOpen, onClose, categories }: AddStud
             }}>
               <span>⚠️</span>
               <span style={{ color: 'var(--text-dim)' }}>
-                Se inicializará el estado de meses anteriores como <strong>MOROSO</strong> por defecto hasta que se registre el primer pago.
+                El estado de los meses previos a la <strong>Fecha de Inscripción</strong> no generará deuda.
               </span>
             </div>
           </div>
