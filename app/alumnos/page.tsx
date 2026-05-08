@@ -19,7 +19,7 @@ export default async function AlumnosPage() {
       (SELECT COUNT(CASE WHEN ms.status = 'PARTIAL' THEN 1 END) FROM monthly_status ms WHERE ms.student_id = s.id AND ms.year = ?) as months_partial
     FROM students s
     ORDER BY s.category, s.name
-  `, [\`\${currentYear}%\`, \`\${currentYear}%\`, \`\${currentYear}%\`, currentYear, currentYear, currentYear]);
+  `, [`${currentYear}%`, `${currentYear}%`, `${currentYear}%`, currentYear, currentYear, currentYear]);
 
   // Monthly statuses for all students in the current year
   const statuses = await db.all('SELECT student_id, month, status FROM monthly_status WHERE year = ?', [currentYear]);
