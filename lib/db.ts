@@ -31,7 +31,10 @@ export async function getDb() {
       },
       run: async (sql: string, params: any[] = []) => {
         let pSql = convertSql(sql);
-        if (pSql.trim().toUpperCase().startsWith('INSERT')) {
+        const isInsert = pSql.trim().toUpperCase().startsWith('INSERT');
+        const isMonthlyStatus = pSql.toLowerCase().includes('monthly_status');
+
+        if (isInsert && !isMonthlyStatus) {
             pSql += ' RETURNING id';
             const result = await postgresPool!.query(pSql, params);
             return { lastID: result.rows[0]?.id };
