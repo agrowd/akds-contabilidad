@@ -342,37 +342,90 @@ export async function addExtraCharge(chargeData: {
 }
 
 /**
- * Toggles the status of a student's extra charge.
+ * Toggles the status of a student's extra charge and syncs it with the payments database.
  */
-export async function toggleExtraChargeStatus(charge_id: number, currentStatus: string) {
+export async function toggleExtraChargeStatus(charge_id: number, currentStatus: string, paymentMethod?: string) {
     const db = await getDb();
     const newStatus = currentStatus === 'PAID' ? 'UNPAID' : 'PAID';
     try {
+        await db.run('BEGIN TRANSACTION');
+        
         await db.run(
             `UPDATE student_extra_charges SET status = ? WHERE id = ?`,
             [newStatus, charge_id]
         );
+        
+        const ec = await db.get(
+            `SELECT student_id, rubro, item_name, amount, due_date, notes 
+             FROM student_extra_charges WHERE id = ?`, 
+            [charge_id]
+        );
+        
+        if (newStatus === 'PAID') {
+            const paymentDate = new Date().toISOString().split('T')[0];
+            const parts = (ec.due_date || paymentDate).split('-');
+            const monthCovered = `${parts[0] || new Date().getFullYear()}-${parts[1] || '01'}-01`;
+            const info = `Pago de cargo especial: ${ec.item_name} ${ec.notes ? `(${ec.notes})` : ''}`.trim();
+            const method = paymentMethod || 'TRANSFERENCIA';
+            
+            const pDate = new Date(paymentDate);
+            const dueDate = new Date(ec.due_date || paymentDate);
+            const delayDays = Math.floor((pDate.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
+            
+            await db.run(
+              `INSERT INTO payments (
+                student_id, payment_date, month_covered, amount_paid, month_value,
+                estado, rubro, method, receipt, due_date, balance, delay_days, info
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                ec.student_id, paymentDate, monthCovered, ec.amount, ec.amount,
+                'ABONADA', ec.rubro, method, `CE-${charge_id}`, ec.due_date || paymentDate, 0, delayDays, info
+              ]
+            );
+        } else {
+            await db.run(
+                `DELETE FROM payments WHERE student_id = ? AND receipt = ? AND rubro = ?`,
+                [ec.student_id, `CE-${charge_id}`, ec.rubro]
+            );
+        }
+        
+        await db.run('COMMIT');
         revalidatePath('/alumnos');
+        revalidatePath('/cobros');
+        revalidatePath('/');
         return { success: true };
     } catch (error: any) {
+        await db.run('ROLLBACK');
         console.error('Error toggling extra charge status:', error);
         return { success: false, error: error.message };
     }
 }
 
 /**
- * Deletes an extra charge.
+ * Deletes an extra charge and cleans up any related payment from the cash flow.
  */
 export async function deleteExtraCharge(charge_id: number) {
     const db = await getDb();
     try {
+        await db.run('BEGIN TRANSACTION');
+        const ec = await db.get(`SELECT student_id, rubro FROM student_extra_charges WHERE id = ?`, [charge_id]);
+        if (ec) {
+            await db.run(
+                `DELETE FROM payments WHERE student_id = ? AND receipt = ? AND rubro = ?`,
+                [ec.student_id, `CE-${charge_id}`, ec.rubro]
+            );
+        }
         await db.run(
             `DELETE FROM student_extra_charges WHERE id = ?`,
             [charge_id]
         );
+        await db.run('COMMIT');
         revalidatePath('/alumnos');
+        revalidatePath('/cobros');
+        revalidatePath('/');
         return { success: true };
     } catch (error: any) {
+        await db.run('ROLLBACK');
         console.error('Error deleting extra charge:', error);
         return { success: false, error: error.message };
     }
