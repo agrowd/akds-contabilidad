@@ -386,7 +386,15 @@ export default function AlumnosUI({ students, statusMap, paymentsByStudent, cate
           <div className="glass student-ficha" style={{ animation: 'fadeIn 0.3s ease-out' }}>
             <div className="student-ficha-header">
               <div style={{ flex: 1 }}>
-                <h2 className="student-name">{selected.name}</h2>
+                <h2 
+                  className="student-name title-hover-edit" 
+                  onClick={() => setIsEditStudentModalOpen(true)}
+                  title="Haga clic para editar todos los datos del alumno"
+                  style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
+                >
+                  {selected.name}
+                  <span style={{ fontSize: '0.8rem', opacity: 0.5 }}>✏️</span>
+                </h2>
                 <div className="student-meta" style={{ marginTop: '0.4rem', display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
                   <span className="badge badge-primary">{selected.category}</span>
                   {selected.group_name && <span className="badge badge-secondary">{selected.group_name}</span>}
@@ -482,7 +490,12 @@ export default function AlumnosUI({ students, statusMap, paymentsByStudent, cate
                   {avgDelay} d
                 </span>
               </div>
-              <div className="detail-item glass" style={{ padding: '0.75rem', textAlign: 'center' }}>
+              <div 
+                className="detail-item glass detail-item-clickable" 
+                style={{ padding: '0.75rem', textAlign: 'center', cursor: 'pointer', transition: 'all 0.2s ease' }}
+                onClick={() => setIsEditStudentModalOpen(true)}
+                title="Haga clic para editar el período de cobro"
+              >
                 <span className="detail-label" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.2rem' }}>Período Activo</span>
                 <span className="detail-value text-secondary" style={{ fontWeight: 700, fontSize: '0.78rem' }}>
                   {selected.enrollment_date ? selected.enrollment_date.substring(0, 7) : '-'} al {selected.period_end_date ? selected.period_end_date.substring(0, 7) : '2026-12'}
@@ -616,16 +629,26 @@ export default function AlumnosUI({ students, statusMap, paymentsByStudent, cate
 
             {/* NOTES */}
             {selected.notes && (
-              <div style={{ 
-                marginTop: '1.5rem', 
-                padding: '1rem', 
-                background: 'rgba(0, 210, 255, 0.05)', 
-                borderRadius: 'var(--radius-md)', 
-                border: '1px solid rgba(0, 210, 255, 0.15)',
-                animation: 'fadeIn 0.5s ease-out'
-              }}>
-                <div style={{ fontSize: '0.7rem', color: 'var(--secondary)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '0.4rem', letterSpacing: '0.05em' }}>
-                  ℹ️ Notas y Observaciones
+              <div 
+                onClick={() => setIsEditStudentModalOpen(true)}
+                title="Haga clic para editar las notas del alumno"
+                style={{ 
+                  marginTop: '1.5rem', 
+                  padding: '1rem', 
+                  background: 'rgba(0, 210, 255, 0.05)', 
+                  borderRadius: 'var(--radius-md)', 
+                  border: '1px solid rgba(0, 210, 255, 0.15)',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  animation: 'fadeIn 0.5s ease-out'
+                }}
+                className="notes-clickable-edit"
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--secondary)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    ℹ️ Notas y Observaciones
+                  </div>
+                  <span style={{ fontSize: '0.7rem', opacity: 0.5 }}>✏️</span>
                 </div>
                 <div style={{ fontSize: '0.88rem', color: 'var(--text-main)', lineHeight: '1.5' }}>
                   {selected.notes}
@@ -642,6 +665,18 @@ export default function AlumnosUI({ students, statusMap, paymentsByStudent, cate
           .payment-row-hover button:hover {
               opacity: 1 !important;
               transform: scale(1.1);
+          }
+          .title-hover-edit:hover {
+              color: var(--primary) !important;
+          }
+          .detail-item-clickable:hover {
+              border-color: rgba(0, 255, 136, 0.3) !important;
+              background: rgba(0, 255, 136, 0.03) !important;
+              transform: translateY(-2px);
+          }
+          .notes-clickable-edit:hover {
+              border-color: rgba(0, 210, 255, 0.4) !important;
+              background: rgba(0, 210, 255, 0.08) !important;
           }
       `}</style>
     </div>
