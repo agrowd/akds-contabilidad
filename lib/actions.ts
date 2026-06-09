@@ -290,3 +290,90 @@ export async function deleteStudent(id: number) {
         return { success: false, error: error.message };
     }
 }
+
+/**
+ * Adds a new clothing item to the global catalog.
+ */
+export async function addCatalogItem(name: string, price: number) {
+    const db = await getDb();
+    try {
+        await db.run(
+            `INSERT INTO clothing_catalog (name, price) VALUES (?, ?)
+             ON CONFLICT(name) DO UPDATE SET price = ?`,
+            [name.toUpperCase().trim(), price, price]
+        );
+        revalidatePath('/alumnos');
+        return { success: true };
+    } catch (error: any) {
+        console.error('Error adding catalog item:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Assigns an extra charge (fichaje, micro, carnet, indumentaria) to a student.
+ */
+export async function addExtraCharge(chargeData: {
+    student_id: number;
+    rubro: string;
+    item_name: string;
+    amount: number;
+    due_date?: string;
+    notes?: string;
+    status?: string;
+}) {
+    const db = await getDb();
+    const { student_id, rubro, item_name, amount, due_date, notes, status } = chargeData;
+    const finalDueDate = due_date || new Date().toISOString().split('T')[0];
+    const finalStatus = status || 'UNPAID';
+
+    try {
+        await db.run(
+            `INSERT INTO student_extra_charges (student_id, rubro, item_name, amount, due_date, status, notes)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [student_id, rubro, item_name, amount, finalDueDate, finalStatus, notes || '']
+        );
+        revalidatePath('/alumnos');
+        return { success: true };
+    } catch (error: any) {
+        console.error('Error adding extra charge:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Toggles the status of a student's extra charge.
+ */
+export async function toggleExtraChargeStatus(charge_id: number, currentStatus: string) {
+    const db = await getDb();
+    const newStatus = currentStatus === 'PAID' ? 'UNPAID' : 'PAID';
+    try {
+        await db.run(
+            `UPDATE student_extra_charges SET status = ? WHERE id = ?`,
+            [newStatus, charge_id]
+        );
+        revalidatePath('/alumnos');
+        return { success: true };
+    } catch (error: any) {
+        console.error('Error toggling extra charge status:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Deletes an extra charge.
+ */
+export async function deleteExtraCharge(charge_id: number) {
+    const db = await getDb();
+    try {
+        await db.run(
+            `DELETE FROM student_extra_charges WHERE id = ?`,
+            [charge_id]
+        );
+        revalidatePath('/alumnos');
+        return { success: true };
+    } catch (error: any) {
+        console.error('Error deleting extra charge:', error);
+        return { success: false, error: error.message };
+    }
+}

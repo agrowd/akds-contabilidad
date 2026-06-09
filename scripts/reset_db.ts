@@ -11,6 +11,8 @@ async function resetAndRebuildDb() {
     if (isProd) {
       console.log('🗑️ Eliminando tablas en Postgres...');
       await db.exec(`
+        DROP TABLE IF EXISTS student_extra_charges CASCADE;
+        DROP TABLE IF EXISTS clothing_catalog CASCADE;
         DROP TABLE IF EXISTS monthly_summary CASCADE;
         DROP TABLE IF EXISTS staff_payments CASCADE;
         DROP TABLE IF EXISTS reconciliations CASCADE;
@@ -85,10 +87,29 @@ async function resetAndRebuildDb() {
             month TEXT,
             total REAL DEFAULT 0
         );
+
+        CREATE TABLE clothing_catalog (
+            id SERIAL PRIMARY KEY,
+            name TEXT UNIQUE,
+            price REAL DEFAULT 0
+        );
+
+        CREATE TABLE student_extra_charges (
+            id SERIAL PRIMARY KEY,
+            student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
+            rubro TEXT,
+            item_name TEXT,
+            amount REAL DEFAULT 0,
+            due_date TEXT,
+            status TEXT DEFAULT 'UNPAID',
+            notes TEXT DEFAULT ''
+        );
       `);
     } else {
       console.log('🗑️ Eliminando tablas en SQLite...');
       await db.exec(`
+        DROP TABLE IF EXISTS student_extra_charges;
+        DROP TABLE IF EXISTS clothing_catalog;
         DROP TABLE IF EXISTS monthly_summary;
         DROP TABLE IF EXISTS staff_payments;
         DROP TABLE IF EXISTS reconciliations;
@@ -164,6 +185,23 @@ async function resetAndRebuildDb() {
             rubro TEXT,
             month TEXT,
             total REAL DEFAULT 0
+        );
+
+        CREATE TABLE clothing_catalog (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE,
+            price REAL DEFAULT 0
+        );
+
+        CREATE TABLE student_extra_charges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
+            rubro TEXT,
+            item_name TEXT,
+            amount REAL DEFAULT 0,
+            due_date TEXT,
+            status TEXT DEFAULT 'UNPAID',
+            notes TEXT DEFAULT ''
         );
       `);
     }

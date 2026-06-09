@@ -7,6 +7,9 @@ interface Student {
   name: string;
   category: string;
   group_name: string;
+  status: string;
+  enrollment_date: string;
+  period_end_date?: string;
 }
 
 interface Debtor {
@@ -194,23 +197,45 @@ export default function DashboardUI({
               </tr>
             </thead>
             <tbody>
-              {filteredStudents.map(s => (
-                <tr key={s.id}>
-                  <td className="sticky-col">{s.name}</td>
-                  <td><span className="category-badge">{s.category.split(' ')[0]}</span></td>
-                  {MONTHS.map(m => {
-                    const st = statusMap[s.id]?.[m] || 'UNPAID';
-                    const cls = st === 'PAID' ? 'status-paid' : st === 'PARTIAL' ? 'status-partial' : 'status-unpaid';
-                    return (
-                      <td key={m}>
-                        <div className={`matrix-cell ${cls}`}>
-                          {st === 'PAID' ? '✓' : st === 'PARTIAL' ? '~' : '✗'}
-                        </div>
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
+              {filteredStudents.map(s => {
+                const startYearMonth = s.enrollment_date ? s.enrollment_date.substring(0, 7) : '2026-02';
+                const currentYearStr = new Date().getFullYear().toString();
+                const endYearMonth = s.period_end_date ? s.period_end_date.substring(0, 7) : `${currentYearStr}-12`;
+
+                return (
+                  <tr key={s.id}>
+                    <td className="sticky-col">{s.name}</td>
+                    <td><span className="category-badge">{s.category.split(' ')[0]}</span></td>
+                    {MONTHS.map((m, idx) => {
+                      const targetYearMonth = `${currentYearStr}-${String(idx + 1).padStart(2, '0')}`;
+                      const inRange = targetYearMonth >= startYearMonth && targetYearMonth <= endYearMonth;
+
+                      const st = statusMap[s.id]?.[m] || 'UNPAID';
+                      let displayStatus = st;
+
+                      if (!inRange) {
+                        displayStatus = 'EXEMPT';
+                      }
+
+                      const cls = displayStatus === 'EXEMPT' ? 'status-exempt'
+                                : displayStatus === 'PAID' ? 'status-paid' 
+                                : displayStatus === 'PARTIAL' ? 'status-partial' 
+                                : 'status-unpaid';
+
+                      return (
+                        <td key={m}>
+                          <div className={`matrix-cell ${cls}`} title={!inRange ? 'Fuera de período' : `Estado: ${displayStatus}`}>
+                            {displayStatus === 'PAID' ? '✓' 
+                             : displayStatus === 'PARTIAL' ? '~' 
+                             : displayStatus === 'EXEMPT' ? '-' 
+                             : '✗'}
+                          </div>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

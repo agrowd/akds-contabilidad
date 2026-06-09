@@ -26,7 +26,7 @@ export default async function DashboardPage() {
 
   // 3. STUDENTS
   const students = await db.all(`
-    SELECT s.id, s.name, s.category, s.status,
+    SELECT s.id, s.name, s.category, s.status, s.enrollment_date, s.period_end_date,
            (SELECT COALESCE(SUM(amount_paid), 0) FROM payments p WHERE p.student_id = s.id) as total_paid
     FROM students s
     ORDER BY s.name
@@ -56,20 +56,54 @@ export default async function DashboardPage() {
     LIMIT 15
   `);
 
-  // 6. TOP DEBTORS (students with most unpaid months)
-  const debtors = await db.all(`
-    SELECT s.id, s.name, s.category,
-           COUNT(CASE WHEN ms.status = 'UNPAID' THEN 1 END) as unpaid_months,
-           COUNT(CASE WHEN ms.status = 'PAID' THEN 1 END) as paid_months,
-           COALESCE(SUM(CASE WHEN ms.status = 'UNPAID' THEN 1 END), 0) as debt_count
-    FROM students s
-    LEFT JOIN monthly_status ms ON s.id = ms.student_id
-    WHERE s.category IN ('INFANTIL', 'ESCUELA SD')
-    GROUP BY s.id
-    HAVING COUNT(CASE WHEN ms.status = 'UNPAID' THEN 1 END) > 0
-    ORDER BY unpaid_months DESC
-    LIMIT 10
-  `);
+  // 6. TOP DEBTORS (dinámico, respetando rango activo de cobro y fecha actual)
+  const currentMonth = new Date().getMonth();
+  const currentDay = new Date().getDate();
+  const currentYearStr = new Date().getFullYear().toString();
+  const MONTHS = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO',
+    'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE'];
+
+  const debtors = students.map((s: any) => {
+    const studentStatus = statusMap[s.id] || {};
+    let monthsPaid = 0;
+    let monthsUnpaid = 0;
+    
+    const startYearMonth = s.enrollment_date ? s.enrollment_date.substring(0, 7) : '2026-02';
+    const endYearMonth = s.period_end_date ? s.period_end_date.substring(0, 7) : `${currentYearStr}-12`;
+
+    MONTHS.forEach((m, idx) => {
+      const targetYearMonth = `${currentYearStr}-${String(idx + 1).padStart(2, '0')}`;
+      const inRange = targetYearMonth >= startYearMonth && targetYearMonth <= endYearMonth;
+      
+      if (inRange) {
+        const st = studentStatus[m];
+        let displayStatus = st || 'UNPAID';
+        
+        if (displayStatus === 'UNPAID' && s.status !== 'SUSPENDIDO') {
+          if (currentMonth > idx || (currentMonth === idx && currentDay > 10)) {
+            displayStatus = 'MOROSO';
+          }
+        }
+
+        if (displayStatus === 'PAID') {
+          monthsPaid++;
+        } else if (displayStatus === 'MOROSO') {
+          monthsUnpaid++;
+        }
+      }
+    });
+
+    return {
+      id: s.id,
+      name: s.name,
+      category: s.category,
+      unpaid_months: monthsUnpaid,
+      paid_months: monthsPaid
+    };
+  })
+  .filter((d: any) => d.unpaid_months > 0)
+  .sort((a: any, b: any) => b.unpaid_months - a.unpaid_months)
+  .slice(0, 10);
 
   // 7. REVENUE BY METHOD
   const revenueByMethod = await db.all(`

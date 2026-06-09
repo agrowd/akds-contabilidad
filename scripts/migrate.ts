@@ -25,6 +25,41 @@ async function migrate() {
         console.log('period_end_date already exists or error:', e.message);
     }
 
+    const isProd = !!process.env.POSTGRES_URL;
+    const serialType = isProd ? 'SERIAL' : 'INTEGER';
+    const autoIncrement = isProd ? '' : 'AUTOINCREMENT';
+
+    try {
+        await db.run(`
+            CREATE TABLE IF NOT EXISTS clothing_catalog (
+                id ${serialType} PRIMARY KEY ${isProd ? '' : 'AUTOINCREMENT'},
+                name TEXT UNIQUE,
+                price REAL DEFAULT 0
+            )
+        `);
+        console.log('Created table clothing_catalog');
+    } catch (e: any) {
+        console.log('Error creating clothing_catalog:', e.message);
+    }
+
+    try {
+        await db.run(`
+            CREATE TABLE IF NOT EXISTS student_extra_charges (
+                id ${serialType} PRIMARY KEY ${isProd ? '' : 'AUTOINCREMENT'},
+                student_id INTEGER,
+                rubro TEXT,
+                item_name TEXT,
+                amount REAL DEFAULT 0,
+                due_date TEXT,
+                status TEXT DEFAULT 'UNPAID',
+                notes TEXT DEFAULT ''
+            )
+        `);
+        console.log('Created table student_extra_charges');
+    } catch (e: any) {
+        console.log('Error creating student_extra_charges:', e.message);
+    }
+
     console.log('Migration finished.');
     process.exit(0);
 }

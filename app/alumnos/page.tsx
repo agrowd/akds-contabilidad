@@ -46,12 +46,25 @@ export default async function AlumnosPage() {
   // Categories for filter
   const categories = await db.all('SELECT DISTINCT category FROM students ORDER BY category');
 
+  // Clothing catalog
+  const catalogItems = await db.all('SELECT * FROM clothing_catalog ORDER BY name');
+
+  // Student extra charges
+  const extraCharges = await db.all('SELECT * FROM student_extra_charges ORDER BY due_date DESC, id DESC');
+  const extraChargesByStudent: Record<number, any[]> = {};
+  extraCharges.forEach((ec: { student_id: number }) => {
+    if (!extraChargesByStudent[ec.student_id]) extraChargesByStudent[ec.student_id] = [];
+    extraChargesByStudent[ec.student_id].push(ec);
+  });
+
   return (
     <AlumnosUI
       students={students}
       statusMap={statusMap}
       paymentsByStudent={paymentsByStudent}
       categories={categories.map((c: { category: string }) => c.category)}
+      catalogItems={catalogItems}
+      extraChargesByStudent={extraChargesByStudent}
     />
   );
 }
