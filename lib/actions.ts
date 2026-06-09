@@ -74,35 +74,43 @@ export async function addStudent(formData: {
   monthly_quota?: number;
   phone?: string;
   enrollment_date?: string; // YYYY-MM-DD
+  period_end_date?: string; // YYYY-MM-DD
   status?: string;
 }) {
   const db = await getDb();
-  const { name, category, group_name, gender, team, notes, monthly_quota, phone, enrollment_date, status } = formData;
+  const { name, category, group_name, gender, team, notes, monthly_quota, phone, enrollment_date, period_end_date, status } = formData;
 
   const finalStatus = status || 'ACTIVE';
   const finalEnrollment = enrollment_date || new Date().toISOString().split('T')[0];
+  const finalPeriodEnd = period_end_date || `${new Date(finalEnrollment).getFullYear()}-12-31`;
 
   try {
     const result = await db.run(
-      `INSERT INTO students (name, category, group_name, gender, team, status, notes, monthly_quota, phone, enrollment_date) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO students (name, category, group_name, gender, team, status, notes, monthly_quota, phone, enrollment_date, period_end_date) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
           name.toUpperCase(), category, group_name || '', gender || null, 
-          team || null, finalStatus, notes || '', monthly_quota || 0, phone || '', finalEnrollment
+          team || null, finalStatus, notes || '', monthly_quota || 0, phone || '', finalEnrollment, finalPeriodEnd
       ]
     );
 
     const studentId = result.lastID;
 
-    // Initialize monthly status for the year from enrollment month to current month
+    // Initialize monthly status for the year from enrollment month to current month or end date
     const enrollDate = new Date(finalEnrollment);
     const enrollMonthIdx = enrollDate.getMonth();
     const enrollYear = enrollDate.getFullYear().toString();
+    
+    const endDate = new Date(finalPeriodEnd);
+    const endMonthIdx = endDate.getMonth();
     const currentMonthIdx = new Date().getMonth();
+    
+    // Only initialize months up to the minimum between the current month and the period end month
+    const limitMonthIdx = Math.min(currentMonthIdx, endMonthIdx);
     
     // Only add months if they are in the same year, and start from enrollment month
     if (new Date().getFullYear() === enrollDate.getFullYear()) {
-        for (let i = enrollMonthIdx; i <= currentMonthIdx; i++) {
+        for (let i = enrollMonthIdx; i <= limitMonthIdx; i++) {
             await db.run(
                 `INSERT INTO monthly_status (student_id, year, month, status) VALUES (?, ?, ?, ?)`,
                 [studentId, enrollYear, MONTHS[i], finalStatus === 'SUSPENDIDO' ? 'SUSPENDIDO' : 'UNPAID']

@@ -32,7 +32,8 @@ async function resetAndRebuildDb() {
             notes TEXT DEFAULT '',
             monthly_quota REAL DEFAULT 0,
             phone TEXT,
-            enrollment_date TEXT DEFAULT '2026-02-01'
+            enrollment_date TEXT DEFAULT '2026-02-01',
+            period_end_date TEXT DEFAULT '2026-12-31'
         );
 
         CREATE TABLE monthly_status (
@@ -109,7 +110,8 @@ async function resetAndRebuildDb() {
             notes TEXT DEFAULT '',
             monthly_quota REAL DEFAULT 0,
             phone TEXT,
-            enrollment_date TEXT DEFAULT '2026-02-01'
+            enrollment_date TEXT DEFAULT '2026-02-01',
+            period_end_date TEXT DEFAULT '2026-12-31'
         );
 
         CREATE TABLE monthly_status (

@@ -4,6 +4,7 @@ import React, { useState, useMemo } from 'react';
 import AddStudentModal from './AddStudentModal';
 import AddPaymentModal from './AddPaymentModal';
 import EditPaymentModal from './EditPaymentModal';
+import EditStudentModal from './EditStudentModal';
 import { deleteStudent, deletePayment, updateStudent, toggleMonthPayment } from '@/lib/actions';
 import { exportToExcel, exportToPDF } from '@/lib/export';
 
@@ -25,6 +26,7 @@ interface Student {
   months_unpaid: number;
   months_partial: number;
   enrollment_date: string;
+  period_end_date?: string;
 }
 
 interface Payment {
@@ -61,6 +63,7 @@ export default function AlumnosUI({ students, statusMap, paymentsByStudent, cate
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isEditPaymentModalOpen, setIsEditPaymentModalOpen] = useState(false);
+  const [isEditStudentModalOpen, setIsEditStudentModalOpen] = useState(false);
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -141,8 +144,57 @@ export default function AlumnosUI({ students, statusMap, paymentsByStudent, cate
       window.open(url, '_blank');
   };
 
+  const computedStudents = useMemo(() => {
+    const currentMonth = new Date().getMonth();
+    const currentDay = new Date().getDate();
+    const currentYearStr = new Date().getFullYear().toString();
+
+    return students.map(s => {
+      const studentStatus = statusMap[s.id] || {};
+      let monthsPaid = 0;
+      let monthsUnpaid = 0;
+      let monthsPartial = 0;
+      
+      const startYearMonth = s.enrollment_date ? s.enrollment_date.substring(0, 7) : '2026-02';
+      const endYearMonth = s.period_end_date ? s.period_end_date.substring(0, 7) : `${currentYearStr}-12`;
+
+      MONTHS.forEach((m, idx) => {
+        const targetYearMonth = `${currentYearStr}-${String(idx + 1).padStart(2, '0')}`;
+        
+        // Verificar si está dentro del rango
+        const inRange = targetYearMonth >= startYearMonth && targetYearMonth <= endYearMonth;
+        
+        if (inRange) {
+          const st = studentStatus[m];
+          let displayStatus = st || 'UNPAID';
+          
+          if (displayStatus === 'UNPAID' && s.status !== 'SUSPENDIDO') {
+            if (currentMonth > idx || (currentMonth === idx && currentDay > 10)) {
+              displayStatus = 'MOROSO';
+            }
+          }
+
+          if (displayStatus === 'PAID') {
+            monthsPaid++;
+          } else if (displayStatus === 'MOROSO') {
+            monthsUnpaid++;
+          } else if (displayStatus === 'PARTIAL') {
+            monthsPartial++;
+          }
+        }
+      });
+
+      return {
+        ...s,
+        months_paid: monthsPaid,
+        months_unpaid: monthsUnpaid,
+        months_partial: monthsPartial,
+      };
+    });
+  }, [students, statusMap]);
+
   const filtered = useMemo(() => {
-    let result = students;
+    let result = computedStudents;
     if (search) {
       const term = search.toUpperCase();
       result = result.filter(s => s.name.toUpperCase().includes(term));
@@ -154,7 +206,7 @@ export default function AlumnosUI({ students, statusMap, paymentsByStudent, cate
       result = result.filter(s => s.status === statusFilter);
     }
     return result;
-  }, [students, search, categoryFilter, statusFilter]);
+  }, [computedStudents, search, categoryFilter, statusFilter]);
 
   const handleExportExcel = () => {
     const data = filtered.map(s => ({
@@ -188,7 +240,7 @@ export default function AlumnosUI({ students, statusMap, paymentsByStudent, cate
     exportToPDF(filtered, `Alumnos_${new Date().toISOString().split('T')[0]}`, 'Reporte de Alumnos', columns);
   };
 
-  const selected = selectedStudent ? students.find(s => s.id === selectedStudent) : null;
+  const selected = selectedStudent ? computedStudents.find(s => s.id === selectedStudent) : null;
   const selectedPayments = selectedStudent ? (paymentsByStudent[selectedStudent] || []) : [];
   const selectedStatus = selectedStudent ? (statusMap[selectedStudent] || {}) : {};
 
@@ -259,6 +311,12 @@ export default function AlumnosUI({ students, statusMap, paymentsByStudent, cate
         isOpen={isAddModalOpen} 
         onClose={() => setIsAddModalOpen(false)} 
         categories={categories}
+      />
+
+      <EditStudentModal
+        isOpen={isEditStudentModalOpen}
+        onClose={() => setIsEditStudentModalOpen(false)}
+        student={selected || null}
       />
 
       <AddPaymentModal
@@ -361,6 +419,19 @@ export default function AlumnosUI({ students, statusMap, paymentsByStudent, cate
                     style={{ 
                         fontSize: '0.75rem', 
                         padding: '0.4rem 0.8rem', 
+                        background: 'rgba(255, 255, 255, 0.05)', 
+                        borderColor: 'rgba(255, 255, 255, 0.2)',
+                        color: '#fff'
+                    }}
+                    onClick={() => setIsEditStudentModalOpen(true)}
+                  >
+                    ✏️ Editar
+                  </button>
+                  <button 
+                    className="btn glass-hover" 
+                    style={{ 
+                        fontSize: '0.75rem', 
+                        padding: '0.4rem 0.8rem', 
                         background: selected.status === 'SUSPENDIDO' ? 'rgba(0, 210, 255, 0.1)' : 'rgba(255, 170, 0, 0.1)', 
                         borderColor: selected.status === 'SUSPENDIDO' ? 'rgba(0, 210, 255, 0.3)' : 'rgba(255, 170, 0, 0.3)',
                         color: selected.status === 'SUSPENDIDO' ? '#00d2ff' : '#ffaa00'
@@ -412,9 +483,9 @@ export default function AlumnosUI({ students, statusMap, paymentsByStudent, cate
                 </span>
               </div>
               <div className="detail-item glass" style={{ padding: '0.75rem', textAlign: 'center' }}>
-                <span className="detail-label" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.2rem' }}>Mes Inicio</span>
-                <span className="detail-value text-secondary" style={{ fontWeight: 700 }}>
-                  {selected.enrollment_date ? selected.enrollment_date.substring(0, 7) : '-'}
+                <span className="detail-label" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.2rem' }}>Período Activo</span>
+                <span className="detail-value text-secondary" style={{ fontWeight: 700, fontSize: '0.78rem' }}>
+                  {selected.enrollment_date ? selected.enrollment_date.substring(0, 7) : '-'} al {selected.period_end_date ? selected.period_end_date.substring(0, 7) : '2026-12'}
                 </span>
               </div>
             </div>
@@ -443,22 +514,34 @@ export default function AlumnosUI({ students, statusMap, paymentsByStudent, cate
                 {MONTHS.map((m, idx) => {
                   const currentMonth = new Date().getMonth();
                   const currentDay = new Date().getDate();
+                  const currentYearStr = new Date().getFullYear().toString();
+                  const targetYearMonth = `${currentYearStr}-${String(idx + 1).padStart(2, '0')}`;
+                  
+                  const startYearMonth = selected.enrollment_date ? selected.enrollment_date.substring(0, 7) : '2026-02';
+                  const endYearMonth = selected.period_end_date ? selected.period_end_date.substring(0, 7) : `${currentYearStr}-12`;
+                  
+                  const inRange = targetYearMonth >= startYearMonth && targetYearMonth <= endYearMonth;
+                  
                   const st = selectedStatus[m];
                   let displayStatus = st || 'UNPAID';
+                  let isClickable = true;
                   
-                  // Compute dynamic MOROSO
-                  if (displayStatus === 'UNPAID' && selected.status !== 'SUSPENDIDO') {
+                  if (!inRange) {
+                    displayStatus = 'EXEMPT';
+                    isClickable = false;
+                  } else if (displayStatus === 'UNPAID' && selected.status !== 'SUSPENDIDO') {
                      if (currentMonth > idx || (currentMonth === idx && currentDay > 10)) {
                          displayStatus = 'MOROSO';
                      }
                   }
 
-                  const cls = displayStatus === 'PAID' ? 'status-paid' 
+                  const cls = displayStatus === 'EXEMPT' ? 'status-exempt'
+                            : displayStatus === 'PAID' ? 'status-paid' 
                             : displayStatus === 'PARTIAL' ? 'status-partial' 
                             : displayStatus === 'MOROSO' ? 'status-danger'
                             : displayStatus === 'SUSPENDIDO' ? 'status-suspended'
                             : 'status-unpaid';
-                            
+                             
                   return (
                     <div key={m} style={{ textAlign: 'center' }}>
                       <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>
@@ -466,11 +549,20 @@ export default function AlumnosUI({ students, statusMap, paymentsByStudent, cate
                       </div>
                       <div 
                         className={`matrix-cell ${cls}`} 
-                        style={{ width: '100%', height: '28px', cursor: 'pointer', userSelect: 'none' }}
-                        onClick={() => handleToggleMonth(selected.id, m, displayStatus)}
-                        title={`Click para cambiar estado (Actual: ${displayStatus})`}
+                        style={{ 
+                          width: '100%', 
+                          height: '28px', 
+                          cursor: isClickable ? 'pointer' : 'not-allowed', 
+                          userSelect: 'none' 
+                        }}
+                        onClick={() => isClickable && handleToggleMonth(selected.id, m, displayStatus)}
+                        title={isClickable ? `Click para cambiar estado (Actual: ${displayStatus})` : 'Fuera de período de cobro'}
                       >
-                        {displayStatus === 'PAID' ? '✓' : displayStatus === 'PARTIAL' ? '~' : displayStatus === 'SUSPENDIDO' ? '⏸' : '✗'}
+                        {displayStatus === 'PAID' ? '✓' 
+                         : displayStatus === 'PARTIAL' ? '~' 
+                         : displayStatus === 'SUSPENDIDO' ? '⏸' 
+                         : displayStatus === 'EXEMPT' ? '-' 
+                         : '✗'}
                       </div>
                     </div>
                   );

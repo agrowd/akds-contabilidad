@@ -14,8 +14,15 @@ async function migrate() {
     try {
         await db.run('ALTER TABLE students ADD COLUMN phone TEXT');
         console.log('Added phone to students');
-    } catch (e) {
+    } catch (e: any) {
         console.log('phone already exists or error:', e.message);
+    }
+
+    try {
+        await db.run("ALTER TABLE students ADD COLUMN period_end_date TEXT DEFAULT '2026-12-31'");
+        console.log('Added period_end_date to students');
+    } catch (e: any) {
+        console.log('period_end_date already exists or error:', e.message);
     }
 
     console.log('Migration finished.');

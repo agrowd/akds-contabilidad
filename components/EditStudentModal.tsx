@@ -1,16 +1,30 @@
 'use client';
 
-import React, { useState } from 'react';
-import { addStudent } from '@/lib/actions';
+import React, { useState, useEffect } from 'react';
+import { updateStudent } from '@/lib/actions';
 
-interface AddStudentModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  categories: string[];
+interface StudentData {
+  id: number;
+  name: string;
+  category: string;
+  group_name: string;
+  gender: string | null;
+  team: string | null;
+  status: string;
+  notes: string;
+  monthly_quota: number;
+  phone: string;
+  enrollment_date: string;
+  period_end_date?: string;
 }
 
-export default function AddStudentModal({ isOpen, onClose, categories }: AddStudentModalProps) {
-  const currentYear = new Date().getFullYear();
+interface EditStudentModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  student: StudentData | null;
+}
+
+export default function EditStudentModal({ isOpen, onClose, student }: EditStudentModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -21,41 +35,51 @@ export default function AddStudentModal({ isOpen, onClose, categories }: AddStud
     notes: '',
     monthly_quota: '',
     phone: '',
-    enrollment_date: `${currentYear}-02-01`,
-    period_end_date: `${currentYear}-12-31`
+    enrollment_date: '',
+    period_end_date: ''
   });
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    if (student) {
+      setFormData({
+        name: student.name || '',
+        category: student.category || 'Infantil',
+        group_name: student.group_name || '',
+        gender: student.gender || '',
+        team: student.team || '',
+        notes: student.notes || '',
+        monthly_quota: student.monthly_quota ? student.monthly_quota.toString() : '0',
+        phone: student.phone || '',
+        enrollment_date: student.enrollment_date ? student.enrollment_date.substring(0, 10) : '',
+        period_end_date: student.period_end_date ? student.period_end_date.substring(0, 10) : '2026-12-31'
+      });
+    }
+  }, [student, isOpen]);
+
+  if (!isOpen || !student) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     
-    // Default category if not selected
     const data = { 
-      ...formData, 
-      category: formData.category || 'Infantil',
-      monthly_quota: formData.monthly_quota ? parseFloat(formData.monthly_quota) : 0
+      name: formData.name.toUpperCase(),
+      category: formData.category,
+      group_name: formData.group_name,
+      gender: formData.gender || null,
+      team: formData.team || null,
+      notes: formData.notes,
+      monthly_quota: formData.monthly_quota ? parseFloat(formData.monthly_quota) : 0,
+      phone: formData.phone,
+      enrollment_date: formData.enrollment_date,
+      period_end_date: formData.period_end_date
     };
     
-    const result = await addStudent(data);
+    const result = await updateStudent(student.id, data);
     
     setIsSubmitting(false);
     if (result.success) {
       onClose();
-      // Reset form
-      setFormData({ 
-        name: '', 
-        category: '', 
-        group_name: '', 
-        gender: '', 
-        team: '', 
-        notes: '', 
-        monthly_quota: '', 
-        phone: '', 
-        enrollment_date: `${currentYear}-02-01`,
-        period_end_date: `${currentYear}-12-31`
-      });
     } else {
       alert('Error al guardar: ' + result.error);
     }
@@ -70,7 +94,7 @@ export default function AddStudentModal({ isOpen, onClose, categories }: AddStud
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content glass animate-in" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
-          <h3 className="modal-title title-gradient">Nuevo Alumno</h3>
+          <h3 className="modal-title title-gradient">Editar Datos de Alumno</h3>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
         
@@ -100,7 +124,6 @@ export default function AddStudentModal({ isOpen, onClose, categories }: AddStud
                   onChange={handleChange}
                   required
                 >
-                  <option value="">Seleccionar...</option>
                   <option value="Infantil">Infantil</option>
                   <option value="Andar FC Adultos">Andar FC Adultos</option>
                   <option value="Sindrome de Down">Sindrome de Down</option>
@@ -206,23 +229,6 @@ export default function AddStudentModal({ isOpen, onClose, categories }: AddStud
                 onChange={handleChange}
               />
             </div>
-
-            <div style={{ 
-              background: 'rgba(239, 68, 68, 0.05)', 
-              padding: '0.75rem', 
-              borderRadius: 'var(--radius-sm)',
-              border: '1px solid rgba(239, 68, 68, 0.1)',
-              fontSize: '0.75rem',
-              color: 'var(--danger-soft)',
-              display: 'flex',
-              gap: '0.5rem',
-              alignItems: 'center'
-            }}>
-              <span>⚠️</span>
-              <span style={{ color: 'var(--text-dim)' }}>
-                El estado de los meses previos a la <strong>Fecha de Inscripción</strong> no generará deuda.
-              </span>
-            </div>
           </div>
           
           <div className="modal-footer">
@@ -230,7 +236,7 @@ export default function AddStudentModal({ isOpen, onClose, categories }: AddStud
               Cancelar
             </button>
             <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
-              {isSubmitting ? 'Guardando...' : 'Guardar Alumno'}
+              {isSubmitting ? 'Guardando...' : 'Guardar Cambios'}
             </button>
           </div>
         </form>
