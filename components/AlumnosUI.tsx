@@ -74,6 +74,7 @@ interface ExtraCharge {
 interface AlumnosUIProps {
   students: Student[];
   statusMap: Record<number, Record<string, string>>;
+  disabledReasonsMap?: Record<number, Record<string, string>>;
   paymentsByStudent: Record<number, Payment[]>;
   categories: string[];
   catalogItems?: CatalogItem[];
@@ -86,6 +87,7 @@ const MONTHS = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO',
 export default function AlumnosUI({ 
   students, 
   statusMap, 
+  disabledReasonsMap = {},
   paymentsByStudent, 
   categories,
   catalogItems = [],
@@ -93,7 +95,7 @@ export default function AlumnosUI({
 }: AlumnosUIProps) {
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
-  const [statusFilter, setStatusFilter] = useState('ACTIVE');
+  const [statusFilter, setStatusFilter] = useState('ALL');
   const [selectedStudent, setSelectedStudent] = useState<number | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -122,6 +124,19 @@ export default function AlumnosUI({
   // Saving states
   const [isSavingExtra, setIsSavingExtra] = useState(false);
   const [isSavingCatalog, setIsSavingCatalog] = useState(false);
+
+  // Disabled Month modal state
+  const [disabledModal, setDisabledModal] = useState<{
+    isOpen: boolean;
+    studentId: number | null;
+    monthName: string;
+    reason: string;
+  }>({
+    isOpen: false,
+    studentId: null,
+    monthName: '',
+    reason: ''
+  });
 
   const handleDeleteStudent = async (id: number, name: string) => {
     if (!confirm(`¿Estás seguro de que deseas eliminar permanentemente a ${name}? Esta acción no se puede deshacer.`)) {
@@ -153,10 +168,22 @@ export default function AlumnosUI({
   const handleToggleMonth = async (studentId: number, month: string, currentStatus: string) => {
       if (currentStatus === 'SUSPENDIDO') return; // Cannot toggle suspended months
       
+      if (currentStatus === 'DESHABILITADO') {
+        const reason = (disabledReasonsMap[studentId] || {})[month] || '';
+        setDisabledModal({
+          isOpen: true,
+          studentId,
+          monthName: month,
+          reason
+        });
+        return;
+      }
+      
       const nextStatusMap: Record<string, string> = {
           'UNPAID': 'PAID',
           'PAID': 'PARTIAL',
-          'PARTIAL': 'UNPAID',
+          'PARTIAL': 'DESHABILITADO',
+          'DESHABILITADO': 'UNPAID',
           'MOROSO': 'PAID' // Pseudo-status from UI maps to UNPAID in DB
       };
       
@@ -164,6 +191,17 @@ export default function AlumnosUI({
       if (currentStatus === 'MOROSO') actualCurrent = 'UNPAID';
 
       const newStatus = nextStatusMap[actualCurrent] || 'PAID';
+      
+      if (newStatus === 'DESHABILITADO') {
+        setDisabledModal({
+          isOpen: true,
+          studentId,
+          monthName: month,
+          reason: ''
+        });
+        return;
+      }
+      
       const currentYear = new Date().getFullYear().toString();
       
       const result = await toggleMonthPayment(studentId, currentYear, month, newStatus);
@@ -484,6 +522,7 @@ export default function AlumnosUI({
         isOpen={isPaymentModalOpen}
         onClose={() => setIsPaymentModalOpen(false)}
         student={selected ? { id: selected.id, name: selected.name, category: selected.category, monthly_quota: selected.monthly_quota } : null}
+        payments={selected ? paymentsByStudent[selected.id] || [] : []}
       />
 
       <EditPaymentModal
@@ -492,6 +531,62 @@ export default function AlumnosUI({
         payment={editingPayment}
         studentName={selected?.name}
       />
+
+      {disabledModal.isOpen && (
+        <div className="modal-overlay" onClick={() => setDisabledModal(prev => ({ ...prev, isOpen: false }))}>
+          <div className="modal-content glass animate-in" style={{ maxWidth: '450px' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title title-gradient">Mes Deshabilitado</h3>
+              <button className="modal-close" onClick={() => setDisabledModal(prev => ({ ...prev, isOpen: false }))}>✕</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ fontSize: '0.9rem', color: '#ccc', marginBottom: '1.2rem', lineHeight: '1.4' }}>
+                Establece el motivo por el cual se deshabilita el mes de <strong>{disabledModal.monthName}</strong> para este alumno. Esto evitará que se calcule como moroso.
+              </p>
+              <div className="form-group">
+                <label className="form-label">Motivo / Detalle</label>
+                <textarea
+                  className="form-textarea"
+                  value={disabledModal.reason}
+                  onChange={e => setDisabledModal(prev => ({ ...prev, reason: e.target.value }))}
+                  placeholder="Ej: Empezó tarde / Licencia médica / Suspensión acordada"
+                  rows={4}
+                  style={{ width: '100%', minHeight: '80px', padding: '0.5rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: 'var(--radius-sm)' }}
+                />
+              </div>
+            </div>
+            <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', marginTop: '1rem' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.25)' }}
+                onClick={async () => {
+                  if (disabledModal.studentId) {
+                    const currentYear = new Date().getFullYear().toString();
+                    await toggleMonthPayment(disabledModal.studentId, currentYear, disabledModal.monthName, 'UNPAID', '');
+                    setDisabledModal(prev => ({ ...prev, isOpen: false }));
+                  }
+                }}
+              >
+                Habilitar Mes (✗)
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={async () => {
+                  if (disabledModal.studentId) {
+                    const currentYear = new Date().getFullYear().toString();
+                    await toggleMonthPayment(disabledModal.studentId, currentYear, disabledModal.monthName, 'DESHABILITADO', disabledModal.reason);
+                    setDisabledModal(prev => ({ ...prev, isOpen: false }));
+                  }
+                }}
+              >
+                Guardar Motivo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: selected ? '1fr 1fr' : '1fr', gap: '1.5rem' }}>
         {/* STUDENT LIST */}
@@ -757,6 +852,7 @@ export default function AlumnosUI({
                       const cls = displayStatus === 'EXEMPT' ? 'status-exempt'
                                 : displayStatus === 'PAID' ? 'status-paid' 
                                 : displayStatus === 'PARTIAL' ? 'status-partial' 
+                                : displayStatus === 'DESHABILITADO' ? 'status-disabled'
                                 : displayStatus === 'MOROSO' ? 'status-danger'
                                 : displayStatus === 'SUSPENDIDO' ? 'status-suspended'
                                 : 'status-unpaid';
@@ -775,12 +871,17 @@ export default function AlumnosUI({
                               userSelect: 'none' 
                             }}
                             onClick={() => isClickable && handleToggleMonth(selected.id, m, displayStatus)}
-                            title={isClickable ? `Click para cambiar estado (Actual: ${displayStatus})` : 'Fuera de período de cobro'}
+                            title={isClickable 
+                              ? (displayStatus === 'DESHABILITADO' 
+                                ? `Mes Deshabilitado: ${(disabledReasonsMap[selected.id] || {})[m] || 'Sin especificar'}` 
+                                : `Click para cambiar estado (Actual: ${displayStatus})`)
+                              : 'Fuera de período de cobro'}
                           >
                             {displayStatus === 'PAID' ? '✓' 
                              : displayStatus === 'PARTIAL' ? '~' 
                              : displayStatus === 'SUSPENDIDO' ? '⏸' 
                              : displayStatus === 'EXEMPT' ? '-' 
+                             : displayStatus === 'DESHABILITADO' ? '🚫'
                              : '✗'}
                           </div>
                         </div>

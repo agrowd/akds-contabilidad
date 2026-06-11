@@ -22,11 +22,16 @@ export default async function AlumnosPage() {
   `, [`${currentYear}%`, `${currentYear}%`, `${currentYear}%`, currentYear, currentYear, currentYear]);
 
   // Monthly statuses for all students in the current year
-  const statuses = await db.all('SELECT student_id, month, status FROM monthly_status WHERE year = ?', [currentYear]);
+  const statuses = await db.all('SELECT student_id, month, status, disabled_reason FROM monthly_status WHERE year = ?', [currentYear]);
   const statusMap: Record<number, Record<string, string>> = {};
-  statuses.forEach((s: { student_id: number; month: string; status: string }) => {
+  const disabledReasonsMap: Record<number, Record<string, string>> = {};
+  statuses.forEach((s: { student_id: number; month: string; status: string; disabled_reason?: string }) => {
     if (!statusMap[s.student_id]) statusMap[s.student_id] = {};
     statusMap[s.student_id][s.month] = s.status;
+    if (s.disabled_reason) {
+      if (!disabledReasonsMap[s.student_id]) disabledReasonsMap[s.student_id] = {};
+      disabledReasonsMap[s.student_id][s.month] = s.disabled_reason;
+    }
   });
 
   // Payment history for all students
@@ -61,6 +66,7 @@ export default async function AlumnosPage() {
     <AlumnosUI
       students={students}
       statusMap={statusMap}
+      disabledReasonsMap={disabledReasonsMap}
       paymentsByStudent={paymentsByStudent}
       categories={categories.map((c: { category: string }) => c.category)}
       catalogItems={catalogItems}

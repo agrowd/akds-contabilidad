@@ -215,11 +215,20 @@ export default function DashboardUI({
 
                       if (!inRange) {
                         displayStatus = 'EXEMPT';
+                      } else if (displayStatus === 'UNPAID' && s.status !== 'SUSPENDIDO') {
+                        const currentMonth = new Date().getMonth();
+                        const currentDay = new Date().getDate();
+                        if (currentMonth > idx || (currentMonth === idx && currentDay > 10)) {
+                          displayStatus = 'MOROSO';
+                        }
                       }
 
                       const cls = displayStatus === 'EXEMPT' ? 'status-exempt'
                                 : displayStatus === 'PAID' ? 'status-paid' 
                                 : displayStatus === 'PARTIAL' ? 'status-partial' 
+                                : displayStatus === 'DESHABILITADO' ? 'status-disabled'
+                                : displayStatus === 'SUSPENDIDO' ? 'status-suspended'
+                                : displayStatus === 'MOROSO' ? 'status-danger'
                                 : 'status-unpaid';
 
                       return (
@@ -228,6 +237,8 @@ export default function DashboardUI({
                             {displayStatus === 'PAID' ? '✓' 
                              : displayStatus === 'PARTIAL' ? '~' 
                              : displayStatus === 'EXEMPT' ? '-' 
+                             : displayStatus === 'DESHABILITADO' ? '🚫'
+                             : displayStatus === 'SUSPENDIDO' ? '⏸'
                              : '✗'}
                           </div>
                         </td>

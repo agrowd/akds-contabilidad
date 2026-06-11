@@ -43,6 +43,7 @@ async function resetAndRebuildDb() {
             year TEXT,
             month TEXT,
             status TEXT,
+            disabled_reason TEXT,
             PRIMARY KEY (student_id, year, month)
         );
 
@@ -140,6 +141,7 @@ async function resetAndRebuildDb() {
             year TEXT,
             month TEXT,
             status TEXT,
+            disabled_reason TEXT,
             PRIMARY KEY (student_id, year, month),
             FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
         );

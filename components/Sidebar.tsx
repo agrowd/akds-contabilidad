@@ -8,6 +8,7 @@ const navItems = [
   { href: '/', label: 'Overview', icon: '📊' },
   { href: '/alumnos', label: 'Alumnos', icon: '👥' },
   { href: '/conceptos-especiales', label: 'Conceptos Especiales', icon: '💎' },
+  { href: '/pagos-parciales', label: 'Pagos Parciales', icon: '⏳' },
   { href: '/cobros', label: 'Cobros', icon: '💰' },
   { href: '/rendicion', label: 'Rendición', icon: '📋' },
 ];

@@ -47,16 +47,18 @@ async function syncMonthlyStatus(student_id: number, month_covered: string) {
     );
 }
 
-export async function toggleMonthPayment(student_id: number, year: string, month: string, newStatus: string) {
+export async function toggleMonthPayment(student_id: number, year: string, month: string, newStatus: string, disabledReason?: string) {
     const db = await getDb();
+    const finalReason = disabledReason || null;
     try {
         await db.run(
-            `INSERT INTO monthly_status (student_id, year, month, status) 
-             VALUES (?, ?, ?, ?)
-             ON CONFLICT(student_id, year, month) DO UPDATE SET status = ?`,
-            [student_id, year, month, newStatus, newStatus]
+            `INSERT INTO monthly_status (student_id, year, month, status, disabled_reason) 
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(student_id, year, month) DO UPDATE SET status = ?, disabled_reason = ?`,
+            [student_id, year, month, newStatus, finalReason, newStatus, finalReason]
         );
         revalidatePath('/alumnos');
+        revalidatePath('/');
         return { success: true };
     } catch (error: any) {
         console.error('Error toggling month:', error);

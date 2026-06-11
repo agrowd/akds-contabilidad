@@ -60,6 +60,13 @@ async function migrate() {
         console.log('Error creating student_extra_charges:', e.message);
     }
 
+    try {
+        await db.run('ALTER TABLE monthly_status ADD COLUMN disabled_reason TEXT');
+        console.log('Added disabled_reason to monthly_status');
+    } catch (e: any) {
+        console.log('disabled_reason already exists or error:', e.message);
+    }
+
     console.log('Migration finished.');
     process.exit(0);
 }

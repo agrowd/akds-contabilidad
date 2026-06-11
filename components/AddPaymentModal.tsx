@@ -3,10 +3,26 @@
 import React, { useState, useEffect } from 'react';
 import { addPayment } from '@/lib/actions';
 
+interface Payment {
+  id: number;
+  student_id: number;
+  payment_date: string;
+  month_covered: string;
+  amount_paid: number;
+  month_value: number;
+  estado: string;
+  rubro: string;
+  method: string;
+  receipt?: string;
+  info?: string;
+}
+
 interface AddPaymentModalProps {
   isOpen: boolean;
   onClose: () => void;
   student: { id: number, name: string, category: string, monthly_quota?: number } | null;
+  payments?: Payment[];
+  initialMonth?: string;
 }
 
 const MONTHS = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO',
@@ -15,7 +31,7 @@ const MONTHS = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO',
 const RUBROS = ['CUOTA INFANTIL', 'CUOTA ADULTOS', 'LIGA LFI', 'CUOTA SD', 'FICHAJE', 'CUOTA TALLER - CDD', 'OTROS'];
 const METODOS = ['EFECTIVO', 'TRANSFERENCIA', 'MP', 'OTRO'];
 
-export default function AddPaymentModal({ isOpen, onClose, student }: AddPaymentModalProps) {
+export default function AddPaymentModal({ isOpen, onClose, student, payments = [], initialMonth }: AddPaymentModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({
     payment_date: new Date().toISOString().split('T')[0],
@@ -28,9 +44,21 @@ export default function AddPaymentModal({ isOpen, onClose, student }: AddPayment
     info: ''
   });
 
+  const [partialInfo, setPartialInfo] = useState<{
+    hasPartial: boolean;
+    paidSoFar: number;
+    totalExpected: number;
+    remaining: number;
+  }>({
+    hasPartial: false,
+    paidSoFar: 0,
+    totalExpected: 0,
+    remaining: 0
+  });
+
+  // Try to guess initial rubro when student changes
   useEffect(() => {
     if (student) {
-        // Try to guess rubro from student category
         const guessedRubro = student.category === 'INFANTIL' ? 'CUOTA INFANTIL' : 'CUOTA SD';
         const quota = (student.monthly_quota !== undefined && student.monthly_quota !== null && student.monthly_quota > 0) 
             ? student.monthly_quota.toString() 
@@ -39,10 +67,64 @@ export default function AddPaymentModal({ isOpen, onClose, student }: AddPayment
         setFormData(prev => ({ 
             ...prev, 
             rubro: guessedRubro,
-            month_value: quota
+            month_value: quota,
+            month_covered: initialMonth || '' // pre-fill initialMonth if passed
         }));
     }
-  }, [student]);
+  }, [student, initialMonth]);
+
+  // Update expected value and suggestions when month covered changes
+  useEffect(() => {
+    if (!student || !formData.month_covered) {
+      setPartialInfo({ hasPartial: false, paidSoFar: 0, totalExpected: 0, remaining: 0 });
+      return;
+    }
+
+    const currentYear = new Date().getFullYear();
+    const monthIdx = MONTHS.indexOf(formData.month_covered);
+    if (monthIdx === -1) return;
+
+    const monthStr = (monthIdx + 1).toString().padStart(2, '0');
+    const prefix = `${currentYear}-${monthStr}`;
+
+    // Filter payments of this student covering this month
+    const monthPayments = payments.filter(p => p.month_covered.startsWith(prefix));
+    const quota = (student.monthly_quota !== undefined && student.monthly_quota !== null && student.monthly_quota > 0)
+        ? student.monthly_quota
+        : 5000;
+
+    if (monthPayments.length > 0) {
+      const totalPaid = monthPayments.reduce((sum, p) => sum + p.amount_paid, 0);
+      const expectedValue = monthPayments[0].month_value || quota;
+      const remaining = Math.max(0, expectedValue - totalPaid);
+
+      setPartialInfo({
+        hasPartial: true,
+        paidSoFar: totalPaid,
+        totalExpected: expectedValue,
+        remaining
+      });
+
+      setFormData(prev => ({
+        ...prev,
+        month_value: expectedValue.toString(),
+        amount_paid: remaining.toString()
+      }));
+    } else {
+      setPartialInfo({
+        hasPartial: false,
+        paidSoFar: 0,
+        totalExpected: quota,
+        remaining: quota
+      });
+
+      setFormData(prev => ({
+        ...prev,
+        month_value: quota.toString(),
+        amount_paid: quota.toString()
+      }));
+    }
+  }, [formData.month_covered, payments, student]);
 
   if (!isOpen || !student) return null;
 
@@ -56,23 +138,28 @@ export default function AddPaymentModal({ isOpen, onClose, student }: AddPayment
     const monthStr = (monthIdx + 1).toString().padStart(2, '0');
     const monthDayOne = `${currentYear}-${monthStr}-01`;
 
+    const amountPaidNum = parseFloat(formData.amount_paid);
+    const monthValueNum = parseFloat(formData.month_value);
+    const totalAccrued = amountPaidNum + partialInfo.paidSoFar;
+    const finalStatus = totalAccrued >= monthValueNum ? 'ABONADA' : 'PARCIAL';
+
     const result = await addPayment({
       student_id: student.id,
       payment_date: formData.payment_date,
       month_covered: monthDayOne,
-      amount_paid: parseFloat(formData.amount_paid),
-      month_value: parseFloat(formData.month_value),
+      amount_paid: amountPaidNum,
+      month_value: monthValueNum,
       rubro: formData.rubro,
       method: formData.method,
       receipt: formData.receipt,
-      status: parseFloat(formData.amount_paid) >= parseFloat(formData.month_value) ? 'ABONADA' : 'PARCIAL',
+      status: finalStatus,
       info: formData.info
     });
     
     setIsSubmitting(false);
     if (result.success) {
       onClose();
-      setFormData(prev => ({ ...prev, amount_paid: '', receipt: '', info: '' }));
+      setFormData(prev => ({ ...prev, amount_paid: '', receipt: '', info: '', month_covered: '' }));
     } else {
       alert('Error al guardar pago: ' + result.error);
     }
@@ -99,6 +186,26 @@ export default function AddPaymentModal({ isOpen, onClose, student }: AddPayment
         
         <form onSubmit={handleSubmit}>
           <div className="modal-body">
+            {partialInfo.hasPartial && (
+              <div style={{
+                background: 'rgba(245, 158, 11, 0.1)',
+                border: '1px solid rgba(245, 158, 11, 0.25)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '0.8rem',
+                marginBottom: '1rem',
+                fontSize: '0.82rem',
+                color: '#f59e0b',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                lineHeight: '1.4'
+              }}>
+                <span style={{ fontSize: '1.2rem' }}>⏳</span>
+                <div>
+                  <strong>Pago parcial previo detectado:</strong> Ya se abonaron <strong>${partialInfo.paidSoFar}</strong> de <strong>${partialInfo.totalExpected}</strong> para {formData.month_covered}. Resta abonar <strong>${partialInfo.remaining}</strong>.
+                </div>
+              </div>
+            )}
             <div className="grid-cols-2">
               <div className="form-group animate-in animate-in-delay-1">
                 <label className="form-label">Mes que cubre</label>
