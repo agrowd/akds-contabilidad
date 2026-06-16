@@ -5,7 +5,7 @@ import { updatePayment } from '@/lib/actions';
 
 interface Payment {
     id: number;
-    student_id: number;
+    student_id: number | null;
     payment_date: string;
     month_covered: string;
     amount_paid: number;

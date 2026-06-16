@@ -13,7 +13,7 @@ export default async function CobrosPage() {
       p.payment_date, p.month_covered, p.amount_paid, p.month_value,
       p.estado, p.rubro, p.method, p.receipt, p.balance, p.delay_days, p.info
     FROM payments p
-    JOIN students s ON p.student_id = s.id
+    LEFT JOIN students s ON p.student_id = s.id
     ORDER BY p.payment_date DESC, p.id DESC
   `);
 

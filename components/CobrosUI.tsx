@@ -6,9 +6,9 @@ import { deletePayment } from '@/lib/actions';
 import { exportToExcel, exportToPDF } from '@/lib/export';
 interface Payment {
   id: number;
-  student_id: number;
-  student_name: string;
-  category: string;
+  student_id: number | null;
+  student_name?: string;
+  category?: string;
   payment_date: string;
   month_covered: string;
   amount_paid: number;
@@ -59,7 +59,10 @@ export default function CobrosUI({ payments, stats, monthlySummary, rubros, meth
     let result = payments;
     if (search) {
       const term = search.toUpperCase();
-      result = result.filter(p => p.student_name.toUpperCase().includes(term));
+      result = result.filter(p => 
+        (p.student_name || 'ADMINISTRACIÓN').toUpperCase().includes(term) || 
+        (p.info || '').toUpperCase().includes(term)
+      );
     }
     if (rubroFilter !== 'ALL') result = result.filter(p => p.rubro === rubroFilter);
     if (methodFilter !== 'ALL') result = result.filter(p => p.method === methodFilter);
@@ -226,7 +229,9 @@ export default function CobrosUI({ payments, stats, monthlySummary, rubros, meth
                   const delayCls = p.delay_days > 0 ? 'text-warning' : p.delay_days < 0 ? 'text-success' : 'text-dim';
                   return (
                     <tr key={p.id}>
-                      <td style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{p.student_name}</td>
+                      <td style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
+                        {p.student_name || <span style={{ color: 'var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '0.2rem' }}>⚙️ Guido (Admin)</span>}
+                      </td>
                       <td className="text-dim" style={{ whiteSpace: 'nowrap', fontSize: '0.78rem' }}>{p.payment_date || '-'}</td>
                       <td style={{ fontSize: '0.78rem' }}>{p.month_covered ? p.month_covered.substring(0, 7) : '-'}</td>
                       <td className="text-right" style={{ fontWeight: 700 }}>${(p.amount_paid || 0).toLocaleString()}</td>
@@ -242,7 +247,11 @@ export default function CobrosUI({ payments, stats, monthlySummary, rubros, meth
                       </td>
                       <td className="text-center">
                           <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
-                              <button onClick={() => handleEdit(p)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.9rem', opacity: 0.7 }} title="Editar">✏️</button>
+                              {p.student_id ? (
+                                  <button onClick={() => handleEdit(p)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.9rem', opacity: 0.7 }} title="Editar">✏️</button>
+                              ) : (
+                                  <span style={{ fontSize: '0.9rem', opacity: 0.25, cursor: 'not-allowed', userSelect: 'none' }} title="Editar en la sección de Administración">✏️</span>
+                              )}
                               <button onClick={() => handleDelete(p.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.9rem', opacity: 0.7 }} title="Eliminar">🗑️</button>
                           </div>
                       </td>

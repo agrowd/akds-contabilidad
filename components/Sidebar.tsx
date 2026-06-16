@@ -11,6 +11,7 @@ const navItems = [
   { href: '/pagos-parciales', label: 'Pagos Parciales', icon: '⏳' },
   { href: '/cobros', label: 'Cobros', icon: '💰' },
   { href: '/rendicion', label: 'Rendición', icon: '📋' },
+  { href: '/pagos-administracion', label: 'Administración', icon: '⚙️' },
 ];
 
 export default function Sidebar() {

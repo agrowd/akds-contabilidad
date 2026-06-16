@@ -216,9 +216,13 @@ export async function updatePayment(id: number, paymentData: any) {
         );
 
         // Sync both old month (if changed) and new month
-        await syncMonthlyStatus(oldPayment.student_id, oldPayment.month_covered);
-        if (oldPayment.month_covered !== month_covered) {
-            await syncMonthlyStatus(oldPayment.student_id, month_covered);
+        if (oldPayment.student_id && oldPayment.month_covered) {
+            await syncMonthlyStatus(oldPayment.student_id, oldPayment.month_covered);
+        }
+        if (oldPayment.student_id && month_covered) {
+            if (oldPayment.month_covered !== month_covered) {
+                await syncMonthlyStatus(oldPayment.student_id, month_covered);
+            }
         }
 
         revalidatePath('/alumnos');
@@ -242,7 +246,9 @@ export async function deletePayment(id: number) {
 
         await db.run(`DELETE FROM payments WHERE id = ?`, [id]);
 
-        await syncMonthlyStatus(payment.student_id, payment.month_covered);
+        if (payment.student_id && payment.month_covered) {
+            await syncMonthlyStatus(payment.student_id, payment.month_covered);
+        }
 
         revalidatePath('/alumnos');
         revalidatePath('/cobros');
@@ -252,6 +258,88 @@ export async function deletePayment(id: number) {
         console.error('Error deleting payment:', error);
         return { success: false, error: error.message };
     }
+}
+
+/**
+ * Adds a new admin payment.
+ */
+export async function addAdminPayment(formData: {
+  payment_date: string;
+  amount_paid: number;
+  rubro: string;
+  method: string;
+  receipt?: string;
+  info: string;
+}) {
+  const db = await getDb();
+  try {
+    await db.run(
+      `INSERT INTO payments (
+        student_id, payment_date, month_covered, amount_paid, month_value,
+        estado, rubro, method, receipt, due_date, balance, delay_days, info
+      ) VALUES (NULL, ?, NULL, ?, 0, 'ABONADA', ?, ?, ?, NULL, 0, 0, ?)`,
+      [
+        formData.payment_date, formData.amount_paid, formData.rubro,
+        formData.method, formData.receipt || '', formData.info
+      ]
+    );
+    revalidatePath('/pagos-administracion');
+    revalidatePath('/cobros');
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error adding admin payment:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Updates an admin payment.
+ */
+export async function updateAdminPayment(id: number, formData: {
+  payment_date: string;
+  amount_paid: number;
+  rubro: string;
+  method: string;
+  receipt?: string;
+  info: string;
+}) {
+  const db = await getDb();
+  try {
+    await db.run(
+      `UPDATE payments SET
+        payment_date = ?, amount_paid = ?, rubro = ?, method = ?, receipt = ?, info = ?
+       WHERE id = ? AND student_id IS NULL`,
+      [
+        formData.payment_date, formData.amount_paid, formData.rubro,
+        formData.method, formData.receipt || '', formData.info, id
+      ]
+    );
+    revalidatePath('/pagos-administracion');
+    revalidatePath('/cobros');
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error updating admin payment:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Deletes an admin payment.
+ */
+export async function deleteAdminPayment(id: number) {
+  const db = await getDb();
+  try {
+    await db.run(`DELETE FROM payments WHERE id = ? AND student_id IS NULL`, [id]);
+    revalidatePath('/pagos-administracion');
+    revalidatePath('/cobros');
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error deleting admin payment:', error);
+    return { success: false, error: error.message };
+  }
 }
 
 /**
