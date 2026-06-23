@@ -79,6 +79,7 @@ interface AlumnosUIProps {
   categories: string[];
   catalogItems?: CatalogItem[];
   extraChargesByStudent?: Record<number, ExtraCharge[]>;
+  initialSelectedStudentId?: number;
 }
 
 const MONTHS = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO',
@@ -91,12 +92,13 @@ export default function AlumnosUI({
   paymentsByStudent, 
   categories,
   catalogItems = [],
-  extraChargesByStudent = {}
+  extraChargesByStudent = {},
+  initialSelectedStudentId
 }: AlumnosUIProps) {
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
-  const [selectedStudent, setSelectedStudent] = useState<number | null>(null);
+  const [selectedStudent, setSelectedStudent] = useState<number | null>(initialSelectedStudentId || null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isEditPaymentModalOpen, setIsEditPaymentModalOpen] = useState(false);
@@ -106,6 +108,13 @@ export default function AlumnosUI({
 
   // Tabs for the student card details
   const [activeTab, setActiveTab] = useState<'CUOTAS' | 'ESPECIALES'>('CUOTAS');
+
+  // React to initialSelectedStudentId changes
+  React.useEffect(() => {
+    if (initialSelectedStudentId !== undefined && initialSelectedStudentId !== null) {
+      setSelectedStudent(initialSelectedStudentId);
+    }
+  }, [initialSelectedStudentId]);
   
   // Extra charge form state
   const [ecRubro, setEcRubro] = useState('FICHAJE');

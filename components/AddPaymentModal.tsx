@@ -23,6 +23,9 @@ interface AddPaymentModalProps {
   student: { id: number, name: string, category: string, monthly_quota?: number } | null;
   payments?: Payment[];
   initialMonth?: string;
+  suggestedRubro?: string;
+  suggestedAmount?: string;
+  suggestedReceipt?: string;
 }
 
 const MONTHS = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO',
@@ -31,7 +34,16 @@ const MONTHS = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO',
 const RUBROS = ['CUOTA INFANTIL', 'CUOTA ADULTOS', 'LIGA LFI', 'CUOTA SD', 'FICHAJE', 'CUOTA TALLER - CDD', 'OTROS'];
 const METODOS = ['EFECTIVO', 'TRANSFERENCIA', 'MP', 'OTRO'];
 
-export default function AddPaymentModal({ isOpen, onClose, student, payments = [], initialMonth }: AddPaymentModalProps) {
+export default function AddPaymentModal({ 
+  isOpen, 
+  onClose, 
+  student, 
+  payments = [], 
+  initialMonth,
+  suggestedRubro,
+  suggestedAmount,
+  suggestedReceipt
+}: AddPaymentModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({
     payment_date: new Date().toISOString().split('T')[0],
@@ -59,22 +71,26 @@ export default function AddPaymentModal({ isOpen, onClose, student, payments = [
   // Try to guess initial rubro when student changes
   useEffect(() => {
     if (student) {
-        const guessedRubro = student.category === 'INFANTIL' ? 'CUOTA INFANTIL' : 'CUOTA SD';
-        const quota = (student.monthly_quota !== undefined && student.monthly_quota !== null && student.monthly_quota > 0) 
+        const guessedRubro = suggestedRubro || (student.category === 'INFANTIL' ? 'CUOTA INFANTIL' : 'CUOTA SD');
+        const quota = suggestedAmount || ((student.monthly_quota !== undefined && student.monthly_quota !== null && student.monthly_quota > 0) 
             ? student.monthly_quota.toString() 
-            : '5000';
+            : '5000');
             
         setFormData(prev => ({ 
             ...prev, 
             rubro: guessedRubro,
             month_value: quota,
+            amount_paid: suggestedAmount || prev.amount_paid || quota,
+            receipt: suggestedReceipt || '',
             month_covered: initialMonth || '' // pre-fill initialMonth if passed
         }));
     }
-  }, [student, initialMonth]);
+  }, [student, initialMonth, suggestedRubro, suggestedAmount, suggestedReceipt]);
 
   // Update expected value and suggestions when month covered changes
   useEffect(() => {
+    if (suggestedRubro) return; // Skip if it's a pre-filled special charge payment
+
     if (!student || !formData.month_covered) {
       setPartialInfo({ hasPartial: false, paidSoFar: 0, totalExpected: 0, remaining: 0 });
       return;
@@ -124,7 +140,13 @@ export default function AddPaymentModal({ isOpen, onClose, student, payments = [
         amount_paid: quota.toString()
       }));
     }
-  }, [formData.month_covered, payments, student]);
+  }, [formData.month_covered, payments, student, suggestedRubro]);
+
+  // Dynamically include suggestedRubro if it's not already in RUBROS list
+  const availableRubros = [...RUBROS];
+  if (suggestedRubro && !availableRubros.includes(suggestedRubro)) {
+    availableRubros.push(suggestedRubro);
+  }
 
   if (!isOpen || !student) return null;
 
@@ -273,7 +295,7 @@ export default function AddPaymentModal({ isOpen, onClose, student, payments = [
                   required
                 >
                   <option value="">Seleccionar...</option>
-                  {RUBROS.map(r => (
+                  {availableRubros.map(r => (
                     <option key={r} value={r}>{r}</option>
                   ))}
                 </select>

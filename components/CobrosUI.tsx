@@ -34,9 +34,9 @@ interface CobrosUIProps {
   stats: {
     total_payments: number;
     total_amount: number;
-    total_abonada: number;
+    total_efectivo: number;
+    total_digital: number;
     total_pendiente: number;
-    total_balance: number;
   };
   monthlySummary: MonthlySummary[];
   rubros: string[];
@@ -149,18 +149,19 @@ export default function CobrosUI({ payments, stats, monthlySummary, rubros, meth
           <p className="stat-label">{stats.total_payments} pagos registrados</p>
         </div>
         <div className="stat-card glass glass-hover animate-in animate-in-delay-1">
-          <p className="stat-label">Abonadas (✓)</p>
-          <p className="stat-value text-success">${(stats.total_abonada || 0).toLocaleString()}</p>
+          <p className="stat-label">Recaudado Efectivo</p>
+          <p className="stat-value text-success">${(stats.total_efectivo || 0).toLocaleString()}</p>
+          <p className="stat-label">Cobros en efectivo</p>
         </div>
         <div className="stat-card glass glass-hover animate-in animate-in-delay-2">
-          <p className="stat-label">Pendientes (⚠️)</p>
-          <p className="stat-value text-warning">${(stats.total_pendiente || 0).toLocaleString()}</p>
+          <p className="stat-label">Recaudado MP / Transf.</p>
+          <p className="stat-value" style={{ color: '#60a5fa' }}>${(stats.total_digital || 0).toLocaleString()}</p>
+          <p className="stat-label">Cobros digitales</p>
         </div>
         <div className="stat-card glass glass-hover animate-in animate-in-delay-3">
-          <p className="stat-label">Saldo Final</p>
-          <p className={`stat-value ${(stats.total_balance || 0) < 0 ? 'text-danger' : 'text-success'}`}>
-            ${(stats.total_balance || 0).toLocaleString()}
-          </p>
+          <p className="stat-label">Monto Pendiente</p>
+          <p className="stat-value text-warning">${(stats.total_pendiente || 0).toLocaleString()}</p>
+          <p className="stat-label">Saldo pendiente de cobro</p>
         </div>
       </div>
 

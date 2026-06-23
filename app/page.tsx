@@ -11,7 +11,8 @@ export default async function DashboardPage() {
     SELECT 
       (SELECT COALESCE(SUM(amount_paid), 0) FROM payments) as total_revenue,
       (SELECT COUNT(*) FROM payments) as total_payments,
-      (SELECT COALESCE(SUM(grand_total), 0) FROM reconciliations) as total_rendido,
+      (SELECT COALESCE(SUM(amount_paid), 0) FROM payments WHERE UPPER(method) = 'EFECTIVO') as total_efectivo,
+      (SELECT COALESCE(SUM(amount_paid), 0) FROM payments WHERE UPPER(method) IN ('MP - TRANSFERENCIA', 'TRANSFERENCIA', 'MP')) as total_digital,
       (SELECT COUNT(*) FROM students WHERE status = 'ACTIVE') as total_students
   `);
 
@@ -43,20 +44,12 @@ export default async function DashboardPage() {
 
   const statusMap: Record<number, Record<string, string>> = {};
   statuses.forEach((s: any) => {
-    if (!statusMap[s.student_id]) statusMap[s.student_id] = {};
-    statusMap[s.student_id][s.month] = s.status;
+    const studentId = Number(s.student_id);
+    if (!statusMap[studentId]) statusMap[studentId] = {};
+    statusMap[studentId][s.month] = s.status;
   });
 
-  // 5. RECENT RECONCILIATIONS
-  const reconciliations = await db.all(`
-    SELECT r.id, r.date, r.rubro, r.grand_total,
-           (SELECT COALESCE(SUM(amount_paid), 0) FROM payments p WHERE p.payment_date = r.date AND p.rubro = r.rubro) as cobrado
-    FROM reconciliations r
-    ORDER BY r.date DESC
-    LIMIT 15
-  `);
-
-  // 6. TOP DEBTORS (dinámico, respetando rango activo de cobro y fecha actual)
+  // 5. TOP DEBTORS (dinámico, respetando rango activo de cobro y fecha actual)
   const currentMonth = new Date().getMonth();
   const currentDay = new Date().getDate();
   const currentYearStr = new Date().getFullYear().toString();
@@ -64,7 +57,8 @@ export default async function DashboardPage() {
     'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE'];
 
   const debtors = students.map((s: any) => {
-    const studentStatus = statusMap[s.id] || {};
+    const studentId = Number(s.id);
+    const studentStatus = statusMap[studentId] || {};
     let monthsPaid = 0;
     let monthsUnpaid = 0;
     
@@ -94,7 +88,7 @@ export default async function DashboardPage() {
     });
 
     return {
-      id: s.id,
+      id: studentId,
       name: s.name,
       category: s.category,
       unpaid_months: monthsUnpaid,
@@ -105,7 +99,7 @@ export default async function DashboardPage() {
   .sort((a: any, b: any) => b.unpaid_months - a.unpaid_months)
   .slice(0, 10);
 
-  // 7. REVENUE BY METHOD
+  // 6. REVENUE BY METHOD
   const revenueByMethod = await db.all(`
     SELECT method, COUNT(*) as count, COALESCE(SUM(amount_paid), 0) as total
     FROM payments
@@ -113,7 +107,7 @@ export default async function DashboardPage() {
     GROUP BY method
   `);
 
-  // 8. REVENUE BY RUBRO
+  // 7. REVENUE BY RUBRO
   const revenueByRubro = await db.all(`
     SELECT rubro, COUNT(*) as count, COALESCE(SUM(amount_paid), 0) as total
     FROM payments
@@ -128,7 +122,6 @@ export default async function DashboardPage() {
       categories={categories}
       students={students}
       statusMap={statusMap}
-      reconciliations={reconciliations}
       debtors={debtors}
       revenueByMethod={revenueByMethod}
       revenueByRubro={revenueByRubro}

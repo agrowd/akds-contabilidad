@@ -22,9 +22,9 @@ export default async function CobrosPage() {
     SELECT 
       COUNT(*) as total_payments,
       COALESCE(SUM(amount_paid), 0) as total_amount,
-      COALESCE(SUM(CASE WHEN estado = 'ABONADA' THEN amount_paid ELSE 0 END), 0) as total_abonada,
-      COALESCE(SUM(CASE WHEN estado = 'PENDIENTE' THEN amount_paid ELSE 0 END), 0) as total_pendiente,
-      COALESCE(SUM(balance), 0) as total_balance
+      COALESCE(SUM(CASE WHEN UPPER(method) = 'EFECTIVO' THEN amount_paid ELSE 0 END), 0) as total_efectivo,
+      COALESCE(SUM(CASE WHEN UPPER(method) IN ('MP - TRANSFERENCIA', 'TRANSFERENCIA', 'MP') THEN amount_paid ELSE 0 END), 0) as total_digital,
+      COALESCE(SUM(CASE WHEN amount_paid < month_value THEN (month_value - amount_paid) ELSE 0 END), 0) as total_pendiente
     FROM payments
   `);
 

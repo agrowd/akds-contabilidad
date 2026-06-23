@@ -3,9 +3,11 @@ import AlumnosUI from '@/components/AlumnosUI';
 
 export const dynamic = 'force-dynamic';
 
-export default async function AlumnosPage() {
+export default async function AlumnosPage({ searchParams }: { searchParams: Promise<{ id?: string }> }) {
   const db = await getDb();
   const currentYear = new Date().getFullYear().toString();
+  const resolvedParams = await searchParams;
+  const selectedId = resolvedParams.id ? parseInt(resolvedParams.id) : undefined;
 
   // All students with their payment summary
   const students = await db.all(`
@@ -26,11 +28,12 @@ export default async function AlumnosPage() {
   const statusMap: Record<number, Record<string, string>> = {};
   const disabledReasonsMap: Record<number, Record<string, string>> = {};
   statuses.forEach((s: { student_id: number; month: string; status: string; disabled_reason?: string }) => {
-    if (!statusMap[s.student_id]) statusMap[s.student_id] = {};
-    statusMap[s.student_id][s.month] = s.status;
+    const studentId = Number(s.student_id);
+    if (!statusMap[studentId]) statusMap[studentId] = {};
+    statusMap[studentId][s.month] = s.status;
     if (s.disabled_reason) {
-      if (!disabledReasonsMap[s.student_id]) disabledReasonsMap[s.student_id] = {};
-      disabledReasonsMap[s.student_id][s.month] = s.disabled_reason;
+      if (!disabledReasonsMap[studentId]) disabledReasonsMap[studentId] = {};
+      disabledReasonsMap[studentId][s.month] = s.disabled_reason;
     }
   });
 
@@ -43,9 +46,11 @@ export default async function AlumnosPage() {
   `);
 
   const paymentsByStudent: Record<number, typeof payments> = {};
-  payments.forEach((p: { student_id: number }) => {
-    if (!paymentsByStudent[p.student_id]) paymentsByStudent[p.student_id] = [];
-    paymentsByStudent[p.student_id].push(p);
+  payments.forEach((p: { student_id: number | null }) => {
+    if (p.student_id === null) return;
+    const studentId = Number(p.student_id);
+    if (!paymentsByStudent[studentId]) paymentsByStudent[studentId] = [];
+    paymentsByStudent[studentId].push(p as any);
   });
 
   // Categories for filter
@@ -58,19 +63,21 @@ export default async function AlumnosPage() {
   const extraCharges = await db.all('SELECT * FROM student_extra_charges ORDER BY due_date DESC, id DESC');
   const extraChargesByStudent: Record<number, any[]> = {};
   extraCharges.forEach((ec: { student_id: number }) => {
-    if (!extraChargesByStudent[ec.student_id]) extraChargesByStudent[ec.student_id] = [];
-    extraChargesByStudent[ec.student_id].push(ec);
+    const studentId = Number(ec.student_id);
+    if (!extraChargesByStudent[studentId]) extraChargesByStudent[studentId] = [];
+    extraChargesByStudent[studentId].push(ec);
   });
 
   return (
     <AlumnosUI
-      students={students}
+      students={students.map((s: any) => ({ ...s, id: Number(s.id) }))}
       statusMap={statusMap}
       disabledReasonsMap={disabledReasonsMap}
       paymentsByStudent={paymentsByStudent}
       categories={categories.map((c: { category: string }) => c.category)}
       catalogItems={catalogItems}
       extraChargesByStudent={extraChargesByStudent}
+      initialSelectedStudentId={selectedId}
     />
   );
 }

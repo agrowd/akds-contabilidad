@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
+import Link from 'next/link';
 
 interface Student {
   id: number;
@@ -20,13 +21,6 @@ interface Debtor {
   paid_months: number;
 }
 
-interface Reconciliation {
-  date: string;
-  rendido: number;
-  cobrado: number;
-  rubro: string;
-}
-
 interface RevenueItem {
   method?: string;
   rubro?: string;
@@ -38,13 +32,13 @@ interface DashboardUIProps {
   stats: {
     total_students: number;
     total_revenue: number;
-    total_txs: number;
-    total_reconciled: number;
+    total_payments: number;
+    total_efectivo: number;
+    total_digital: number;
   };
   categories: { category: string; count: number }[];
   students: Student[];
   statusMap: Record<number, Record<string, string>>;
-  reconciliations: Reconciliation[];
   debtors: Debtor[];
   revenueByMethod: RevenueItem[];
   revenueByRubro: RevenueItem[];
@@ -55,9 +49,10 @@ const MONTHS = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO',
 
 export default function DashboardUI({
   stats, categories, students, statusMap,
-  reconciliations, debtors, revenueByMethod, revenueByRubro
+  debtors, revenueByMethod, revenueByRubro
 }: DashboardUIProps) {
   const [searchTerm, setSearchTerm] = useState('');
+  const [matrixCategoryFilter, setMatrixCategoryFilter] = useState('ALL');
 
   const filteredStudents = useMemo(() => {
     if (!searchTerm) return students;
@@ -65,7 +60,13 @@ export default function DashboardUI({
     return students.filter(s => s.name.toUpperCase().includes(term));
   }, [students, searchTerm]);
 
-  const diffTotal = (stats.total_revenue || 0) - (stats.total_reconciled || 0);
+  const matrixFilteredStudents = useMemo(() => {
+    let result = filteredStudents;
+    if (matrixCategoryFilter !== 'ALL') {
+      result = result.filter(s => s.category === matrixCategoryFilter);
+    }
+    return result;
+  }, [filteredStudents, matrixCategoryFilter]);
 
   return (
     <div>
@@ -80,17 +81,15 @@ export default function DashboardUI({
         <div className="stat-card glass glass-hover animate-in">
           <p className="stat-label">Revenue Total</p>
           <p className="stat-value">${(stats.total_revenue || 0).toLocaleString()}</p>
-          <p className="stat-label">{stats.total_txs} pagos registrados</p>
+          <p className="stat-label">{stats.total_payments} pagos registrados</p>
         </div>
         <div className="stat-card glass glass-hover animate-in animate-in-delay-1">
-          <p className="stat-label">Total Rendido</p>
-          <p className="stat-value">${(stats.total_reconciled || 0).toLocaleString()}</p>
+          <p className="stat-label">Recaudado Efectivo ($$$)</p>
+          <p className="stat-value" style={{ color: 'var(--success)' }}>${(stats.total_efectivo || 0).toLocaleString()}</p>
         </div>
         <div className="stat-card glass glass-hover animate-in animate-in-delay-2">
-          <p className="stat-label">Diferencia</p>
-          <p className={`stat-value ${Math.abs(diffTotal) > 0 ? 'text-warning' : 'text-success'}`}>
-            ${(diffTotal || 0).toLocaleString()}
-          </p>
+          <p className="stat-label">Recaudado MP / Transf.</p>
+          <p className="stat-value" style={{ color: 'var(--primary)' }}>${(stats.total_digital || 0).toLocaleString()}</p>
         </div>
         <div className="stat-card glass glass-hover animate-in animate-in-delay-3">
           <p className="stat-label">Total Alumnos</p>
@@ -115,16 +114,38 @@ export default function DashboardUI({
 
         {/* Revenue by Rubro */}
         <div className="glass" style={{ padding: '1.25rem 1.5rem' }}>
-          <h3 className="section-title">💰 Revenue por Rubro</h3>
+          <h3 className="section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>💰 Revenue por Rubro</span>
+            <Link href="/revenue-rubro" style={{ fontSize: '0.75rem', color: 'var(--primary)', textDecoration: 'none' }} className="hover-underline">
+              Ver todos ↗
+            </Link>
+          </h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             {revenueByRubro.map(item => (
-              <div key={item.rubro} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0', borderBottom: '1px solid var(--card-border)' }}>
+              <Link 
+                key={item.rubro} 
+                href={`/revenue-rubro?rubro=${encodeURIComponent(item.rubro || '')}`}
+                style={{ 
+                  display: 'flex', 
+                  justifyContent: 'space-between', 
+                  alignItems: 'center', 
+                  padding: '0.6rem 0.8rem', 
+                  borderBottom: '1px solid var(--card-border)',
+                  textDecoration: 'none',
+                  color: 'inherit',
+                  borderRadius: 'var(--radius-sm)'
+                }}
+                className="payment-row-hover"
+              >
                 <div>
-                  <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{item.rubro}</span>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--primary)' }}>{item.rubro}</span>
                   <span className="text-dim" style={{ fontSize: '0.72rem', marginLeft: '0.5rem' }}>{item.count} pagos</span>
                 </div>
-                <span style={{ fontSize: '0.9rem', fontWeight: 700 }}>${(item.total || 0).toLocaleString()}</span>
-              </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <span style={{ fontSize: '0.9rem', fontWeight: 700 }}>${(item.total || 0).toLocaleString()}</span>
+                  <span style={{ fontSize: '0.75rem', opacity: 0.5 }}>→</span>
+                </div>
+              </Link>
             ))}
           </div>
         </div>
@@ -151,7 +172,11 @@ export default function DashboardUI({
               <tbody>
                 {debtors.map(d => (
                   <tr key={d.id}>
-                    <td style={{ fontWeight: 600 }}>{d.name}</td>
+                    <td style={{ fontWeight: 600 }}>
+                      <Link href={`/alumnos?id=${d.id}`} style={{ color: 'var(--primary)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }} className="hover-underline">
+                        {d.name} <span style={{ fontSize: '0.7rem', opacity: 0.5 }}>↗</span>
+                      </Link>
+                    </td>
                     <td><span className="category-badge">{d.category}</span></td>
                     <td className="text-center text-danger" style={{ fontWeight: 700 }}>{d.unpaid_months}</td>
                     <td className="text-center text-success">{d.paid_months}</td>
@@ -173,18 +198,31 @@ export default function DashboardUI({
 
       {/* PAYMENT MATRIX */}
       <div className="section">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
           <h3 className="section-title" style={{ margin: 0 }}>
-            📅 Matriz de Pagos ({filteredStudents.length}/{students.length})
+            📅 Matriz de Pagos ({matrixFilteredStudents.length}/{students.length})
           </h3>
-          <input
-            type="text"
-            placeholder="Buscar por nombre..."
-            className="search-input"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            style={{ minWidth: '240px' }}
-          />
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <select
+              className="filter-select"
+              value={matrixCategoryFilter}
+              onChange={(e) => setMatrixCategoryFilter(e.target.value)}
+              style={{ minWidth: '180px', margin: 0 }}
+            >
+              <option value="ALL">Todas las Academias</option>
+              {categories.map(c => (
+                <option key={c.category} value={c.category}>{c.category}</option>
+              ))}
+            </select>
+            <input
+              type="text"
+              placeholder="Buscar por nombre..."
+              className="search-input"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              style={{ minWidth: '240px', margin: 0 }}
+            />
+          </div>
         </div>
 
         <div className="glass matrix-wrapper">
@@ -197,7 +235,7 @@ export default function DashboardUI({
               </tr>
             </thead>
             <tbody>
-              {filteredStudents.map(s => {
+              {matrixFilteredStudents.map(s => {
                 const startYearMonth = s.enrollment_date ? s.enrollment_date.substring(0, 7) : '2026-02';
                 const currentYearStr = new Date().getFullYear().toString();
                 const endYearMonth = s.period_end_date ? s.period_end_date.substring(0, 7) : `${currentYearStr}-12`;
@@ -244,42 +282,6 @@ export default function DashboardUI({
                         </td>
                       );
                     })}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* RECONCILIATION TABLE */}
-      <div className="section">
-        <div className="glass table-wrapper">
-          <div className="table-header">
-            <h3 className="table-title">📋 Rendición vs Cobros</h3>
-          </div>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Fecha</th>
-                <th>Rubro</th>
-                <th className="text-right">Rendido</th>
-                <th className="text-right">Cobrado</th>
-                <th className="text-right">Diferencia</th>
-              </tr>
-            </thead>
-            <tbody>
-              {reconciliations.map((d, i) => {
-                const diff = (d.cobrado || 0) - (d.rendido || 0);
-                return (
-                  <tr key={i}>
-                    <td>{d.date}</td>
-                    <td><span className="category-badge">{d.rubro}</span></td>
-                    <td className="text-right">${(d.rendido || 0).toLocaleString()}</td>
-                    <td className="text-right">${(d.cobrado || 0).toLocaleString()}</td>
-                    <td className="text-right" style={{ color: diff !== 0 ? 'var(--warning)' : 'var(--success)', fontWeight: 700 }}>
-                      ${(diff || 0).toLocaleString()}
-                    </td>
                   </tr>
                 );
               })}
