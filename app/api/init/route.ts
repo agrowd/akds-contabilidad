@@ -37,7 +37,8 @@ export async function GET() {
             due_date TEXT,
             balance REAL,
             delay_days INTEGER,
-            info TEXT
+            info TEXT,
+            rendido INTEGER DEFAULT 0
         );
     `);
 
