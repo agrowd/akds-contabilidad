@@ -67,6 +67,13 @@ async function migrate() {
         console.log('disabled_reason already exists or error:', e.message);
     }
 
+    try {
+        await db.run('ALTER TABLE payments ADD COLUMN rendido INTEGER DEFAULT 0');
+        console.log('Added rendido to payments');
+    } catch (e: any) {
+        console.log('rendido already exists or error:', e.message);
+    }
+
     console.log('Migration finished.');
     process.exit(0);
 }

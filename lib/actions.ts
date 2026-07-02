@@ -520,3 +520,20 @@ export async function deleteExtraCharge(charge_id: number) {
         return { success: false, error: error.message };
     }
 }
+
+/**
+ * Toggles the 'rendido' status of a cash payment.
+ */
+export async function togglePaymentRendido(id: number, currentRendido: number) {
+    const db = await getDb();
+    const newStatus = currentRendido === 1 ? 0 : 1;
+    try {
+        await db.run('UPDATE payments SET rendido = ? WHERE id = ?', [newStatus, id]);
+        revalidatePath('/cobros');
+        revalidatePath('/');
+        return { success: true, newStatus };
+    } catch (error: any) {
+        console.error('Error toggling rendido status:', error);
+        return { success: false, error: error.message };
+    }
+}

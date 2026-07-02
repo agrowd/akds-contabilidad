@@ -11,7 +11,8 @@ export default async function CobrosPage() {
     SELECT 
       p.id, p.student_id, s.name as student_name, s.category,
       p.payment_date, p.month_covered, p.amount_paid, p.month_value,
-      p.estado, p.rubro, p.method, p.receipt, p.balance, p.delay_days, p.info
+      p.estado, p.rubro, p.method, p.receipt, p.balance, p.delay_days, p.info,
+      p.rendido
     FROM payments p
     LEFT JOIN students s ON p.student_id = s.id
     ORDER BY p.payment_date DESC, p.id DESC

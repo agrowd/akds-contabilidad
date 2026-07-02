@@ -61,7 +61,8 @@ async function resetAndRebuildDb() {
             due_date TEXT,
             balance REAL DEFAULT 0,
             delay_days INTEGER DEFAULT 0,
-            info TEXT DEFAULT ''
+            info TEXT DEFAULT '',
+            rendido INTEGER DEFAULT 0
         );
 
         CREATE TABLE reconciliations (
@@ -161,6 +162,7 @@ async function resetAndRebuildDb() {
             balance REAL DEFAULT 0,
             delay_days INTEGER DEFAULT 0,
             info TEXT DEFAULT '',
+            rendido INTEGER DEFAULT 0,
             FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
         );
 

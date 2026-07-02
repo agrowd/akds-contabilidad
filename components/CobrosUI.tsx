@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo } from 'react';
 import EditPaymentModal from './EditPaymentModal';
-import { deletePayment } from '@/lib/actions';
+import { deletePayment, togglePaymentRendido } from '@/lib/actions';
 import { exportToExcel, exportToPDF } from '@/lib/export';
 interface Payment {
   id: number;
@@ -21,6 +21,7 @@ interface Payment {
   balance: number;
   delay_days: number;
   info: string;
+  rendido?: number;
 }
 
 interface MonthlySummary {
@@ -52,6 +53,7 @@ export default function CobrosUI({ payments, stats, monthlySummary, rubros, meth
   const [methodFilter, setMethodFilter] = useState('ALL');
   const [estadoFilter, setEstadoFilter] = useState('ALL');
   const [monthFilter, setMonthFilter] = useState('ALL');
+  const [rendidoFilter, setRendidoFilter] = useState('ALL');
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
@@ -68,10 +70,23 @@ export default function CobrosUI({ payments, stats, monthlySummary, rubros, meth
     if (methodFilter !== 'ALL') result = result.filter(p => p.method === methodFilter);
     if (estadoFilter !== 'ALL') result = result.filter(p => p.estado === estadoFilter);
     if (monthFilter !== 'ALL') result = result.filter(p => p.month_covered === monthFilter);
+    if (rendidoFilter !== 'ALL') {
+      if (rendidoFilter === 'PENDIENTE') {
+        result = result.filter(p => p.method === 'EFECTIVO' && !p.rendido);
+      } else if (rendidoFilter === 'RENDIDO') {
+        result = result.filter(p => p.method === 'EFECTIVO' && p.rendido === 1);
+      }
+    }
     return result;
-  }, [payments, search, rubroFilter, methodFilter, estadoFilter, monthFilter]);
+  }, [payments, search, rubroFilter, methodFilter, estadoFilter, monthFilter, rendidoFilter]);
 
   const filteredTotal = filtered.reduce((sum, p) => sum + p.amount_paid, 0);
+
+  const faltaRendir = useMemo(() => {
+    return payments
+      .filter(p => p.method === 'EFECTIVO' && !p.rendido)
+      .reduce((sum, p) => sum + p.amount_paid, 0);
+  }, [payments]);
 
   const handleDelete = async (id: number) => {
       if (!confirm('¿Estás seguro de que deseas eliminar este pago?')) return;
@@ -82,6 +97,15 @@ export default function CobrosUI({ payments, stats, monthlySummary, rubros, meth
   const handleEdit = (payment: Payment) => {
       setEditingPayment(payment);
       setIsEditModalOpen(true);
+  };
+
+  const handleToggleRendido = async (id: number, currentRendido: number) => {
+      const result = await togglePaymentRendido(id, currentRendido);
+      if (!result.success) {
+          alert('Error: ' + result.error);
+      } else {
+          window.location.reload();
+      }
   };
 
   const handleExportExcel = () => {
@@ -151,7 +175,10 @@ export default function CobrosUI({ payments, stats, monthlySummary, rubros, meth
         <div className="stat-card glass glass-hover animate-in animate-in-delay-1">
           <p className="stat-label">Recaudado Efectivo</p>
           <p className="stat-value text-success">${(stats.total_efectivo || 0).toLocaleString()}</p>
-          <p className="stat-label">Cobros en efectivo</p>
+          <p className="stat-label" style={{ display: 'flex', justifyContent: 'space-between', width: '100%', marginTop: '0.25rem' }}>
+            <span>Cobros en efectivo</span>
+            <span style={{ color: '#f59e0b', fontWeight: 600 }}>Falta rendir: ${faltaRendir.toLocaleString()}</span>
+          </p>
         </div>
         <div className="stat-card glass glass-hover animate-in animate-in-delay-2">
           <p className="stat-label">Recaudado MP / Transf.</p>
@@ -191,6 +218,11 @@ export default function CobrosUI({ payments, stats, monthlySummary, rubros, meth
           <option value="ALL">Todos los meses</option>
           {MONTHS_ORDER.map(m => <option key={m} value={m}>{m}</option>)}
         </select>
+        <select className="filter-select" value={rendidoFilter} onChange={e => setRendidoFilter(e.target.value)}>
+          <option value="ALL">Rendición: Todas</option>
+          <option value="PENDIENTE">Pendientes de Rendir</option>
+          <option value="RENDIDO">Rendidos</option>
+        </select>
         <div style={{ display: 'flex', gap: '0.5rem', marginLeft: 'auto' }}>
           <button onClick={handleExportExcel} className="btn" style={{ background: '#217346', color: 'white', border: 'none', padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}>
             📊 Excel
@@ -229,18 +261,46 @@ export default function CobrosUI({ payments, stats, monthlySummary, rubros, meth
                 {filtered.map(p => {
                   const delayCls = p.delay_days > 0 ? 'text-warning' : p.delay_days < 0 ? 'text-success' : 'text-dim';
                   return (
-                    <tr key={p.id}>
-                      <td style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
+                    <tr 
+                      key={p.id}
+                      style={{ 
+                        background: p.rendido === 1 ? 'rgba(16, 185, 129, 0.02)' : 'transparent',
+                        opacity: p.rendido === 1 ? 0.75 : 1
+                      }}
+                    >
+                      <td style={{ fontWeight: 600, whiteSpace: 'nowrap', textDecoration: p.rendido === 1 ? 'line-through' : 'none' }}>
                         {p.student_name || <span style={{ color: 'var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '0.2rem' }}>⚙️ Guido (Admin)</span>}
                       </td>
                       <td className="text-dim" style={{ whiteSpace: 'nowrap', fontSize: '0.78rem' }}>{p.payment_date || '-'}</td>
                       <td style={{ fontSize: '0.78rem' }}>{p.month_covered ? p.month_covered.substring(0, 7) : '-'}</td>
-                      <td className="text-right" style={{ fontWeight: 700 }}>${(p.amount_paid || 0).toLocaleString()}</td>
+                      <td className="text-right" style={{ fontWeight: 700, textDecoration: p.rendido === 1 ? 'line-through' : 'none' }}>
+                        ${(p.amount_paid || 0).toLocaleString()}
+                      </td>
                       <td className="text-right text-dim" style={{ fontSize: '0.72rem' }}>${(p.month_value || 0).toLocaleString()}</td>
                       <td className={`text-center ${delayCls}`} style={{ fontSize: '0.72rem', fontWeight: p.delay_days !== 0 ? 600 : 400 }}>
                         {p.delay_days > 0 ? `+${p.delay_days}d` : p.delay_days < 0 ? `${p.delay_days}d` : '-'}
                       </td>
-                      <td style={{ fontSize: '0.78rem' }}>{p.method || '-'}</td>
+                      <td style={{ fontSize: '0.78rem' }}>
+                        {p.method === 'EFECTIVO' ? (
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <input 
+                              type="checkbox" 
+                              checked={p.rendido === 1}
+                              onChange={() => handleToggleRendido(p.id, p.rendido || 0)}
+                              style={{ 
+                                cursor: 'pointer',
+                                width: '14px',
+                                height: '14px',
+                                accentColor: '#10b981'
+                              }}
+                              title={p.rendido === 1 ? "Marcar como pendiente de rendir" : "Marcar como rendido"}
+                            />
+                            <span>{p.method}</span>
+                          </div>
+                        ) : (
+                          <span>{p.method || '-'}</span>
+                        )}
+                      </td>
                       <td className="text-center">
                         <span className={`badge ${p.estado === 'ABONADA' ? 'badge-success' : 'badge-warning'}`}>
                           {p.estado}
