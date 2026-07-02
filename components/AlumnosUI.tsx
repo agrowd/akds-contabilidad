@@ -147,6 +147,18 @@ export default function AlumnosUI({
     reason: ''
   });
 
+  // Payment method prompt modal state
+  const [paymentPrompt, setPaymentPrompt] = useState<{
+    isOpen: boolean;
+    chargeId: number | null;
+    currentStatus: string;
+  }>({
+    isOpen: false,
+    chargeId: null,
+    currentStatus: ''
+  });
+  const [selectedMethod, setSelectedMethod] = useState<'EFECTIVO' | 'TRANSFERENCIA' | 'MP' | 'OTRO'>('TRANSFERENCIA');
+
   const handleDeleteStudent = async (id: number, name: string) => {
     if (!confirm(`¿Estás seguro de que deseas eliminar permanentemente a ${name}? Esta acción no se puede deshacer.`)) {
       return;
@@ -309,9 +321,25 @@ export default function AlumnosUI({
     }
   };
 
-  const handleToggleExtraCharge = async (chargeId: number, currentStatus: string) => {
-    const result = await toggleExtraChargeStatus(chargeId, currentStatus);
-    if (!result.success) {
+  const handleToggleClick = (chargeId: number, currentStatus: string) => {
+    if (currentStatus === 'UNPAID') {
+      // Open payment method modal before setting PAID
+      setPaymentPrompt({
+        isOpen: true,
+        chargeId,
+        currentStatus
+      });
+    } else {
+      // Toggle back to UNPAID immediately
+      handleToggleExtraCharge(chargeId, currentStatus);
+    }
+  };
+
+  const handleToggleExtraCharge = async (chargeId: number, currentStatus: string, method?: string) => {
+    const result = await toggleExtraChargeStatus(chargeId, currentStatus, method);
+    if (result.success) {
+      setPaymentPrompt({ isOpen: false, chargeId: null, currentStatus: '' });
+    } else {
       alert('Error al cambiar estado: ' + result.error);
     }
   };
@@ -1119,7 +1147,7 @@ export default function AlumnosUI({
                             
                             <button
                               type="button"
-                              onClick={() => handleToggleExtraCharge(charge.id, charge.status)}
+                              onClick={() => handleToggleClick(charge.id, charge.status)}
                               className="btn"
                               style={{
                                 padding: '0.2rem 0.5rem',
@@ -1129,7 +1157,7 @@ export default function AlumnosUI({
                                 border: `1px solid ${charge.status === 'PAID' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`
                               }}
                             >
-                              {charge.status === 'PAID' ? '✓ Pagado' : '✗ Impago'}
+                              {charge.status === 'PAID' ? '✓ Cobrado' : '⚡ Marcar Cobrado'}
                             </button>
 
                             <button 
@@ -1287,6 +1315,67 @@ export default function AlumnosUI({
               background: rgba(0, 210, 255, 0.08) !important;
           }
       `}</style>
+
+      {/* PAYMENT METHOD SELECTION PROMPT MODAL */}
+      {paymentPrompt.isOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          animation: 'fadeIn 0.2s ease-out'
+        }}>
+          <div className="glass" style={{ width: '400px', padding: '1.5rem', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 'var(--radius-lg)' }}>
+            <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#fff', marginBottom: '1rem' }}>💵 Seleccionar Método de Pago</h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-dim)', marginBottom: '1.25rem' }}>Por favor selecciona el método por el cual el alumno realiza este pago para registrarlo en el flujo de caja.</p>
+            
+            <div style={{ marginBottom: '1.25rem' }}>
+              <label style={{ fontSize: '0.7rem', color: 'var(--text-dim)', display: 'block', marginBottom: '0.4rem', fontWeight: 600 }}>Método de Pago</label>
+              <select 
+                className="filter-select" 
+                style={{ width: '100%', margin: 0, height: '40px' }}
+                value={selectedMethod}
+                onChange={e => setSelectedMethod(e.target.value as any)}
+              >
+                <option value="EFECTIVO">EFECTIVO</option>
+                <option value="TRANSFERENCIA">TRANSFERENCIA</option>
+                <option value="MP">MERCADO PAGO</option>
+                <option value="OTRO">OTRO</option>
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button 
+                type="button" 
+                className="btn btn-secondary" 
+                style={{ flex: 1 }}
+                onClick={() => setPaymentPrompt({ isOpen: false, chargeId: null, currentStatus: '' })}
+              >
+                Cancelar
+              </button>
+              <button 
+                type="button" 
+                className="btn btn-primary glass-hover" 
+                style={{ flex: 1, fontWeight: 600, boxShadow: '0 0 10px var(--primary-glow)' }}
+                onClick={() => {
+                  if (paymentPrompt.chargeId) {
+                    handleToggleExtraCharge(paymentPrompt.chargeId, paymentPrompt.currentStatus, selectedMethod);
+                  }
+                }}
+              >
+                Confirmar Pago
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
