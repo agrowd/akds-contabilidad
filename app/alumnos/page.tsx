@@ -60,7 +60,13 @@ export default async function AlumnosPage({ searchParams }: { searchParams: Prom
   const catalogItems = await db.all('SELECT * FROM clothing_catalog ORDER BY name');
 
   // Student extra charges
-  const extraCharges = await db.all('SELECT * FROM student_extra_charges ORDER BY due_date DESC, id DESC');
+  const extraCharges = await db.all(`
+    SELECT ec.id, ec.student_id, ec.rubro, ec.item_name, ec.amount, ec.due_date, ec.status, ec.notes,
+           p.method as payment_method
+    FROM student_extra_charges ec
+    LEFT JOIN payments p ON p.receipt = 'CE-' || CAST(ec.id AS TEXT) AND p.student_id = ec.student_id
+    ORDER BY ec.due_date DESC, ec.id DESC
+  `);
   const extraChargesByStudent: Record<number, any[]> = {};
   extraCharges.forEach((ec: { student_id: number }) => {
     const studentId = Number(ec.student_id);

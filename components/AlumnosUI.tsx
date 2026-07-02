@@ -69,6 +69,7 @@ interface ExtraCharge {
   due_date: string;
   status: string;
   notes: string;
+  payment_method?: string;
 }
 
 interface AlumnosUIProps {
@@ -124,6 +125,7 @@ export default function AlumnosUI({
   const [ecDueDate, setEcDueDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [ecNotes, setEcNotes] = useState('');
   const [ecStatus, setEcStatus] = useState('UNPAID');
+  const [ecMethod, setEcMethod] = useState('TRANSFERENCIA');
 
   // Catalog item form state
   const [isAddingCatalogItem, setIsAddingCatalogItem] = useState(false);
@@ -306,7 +308,8 @@ export default function AlumnosUI({
       amount: amountNum,
       due_date: ecDueDate,
       notes: ecNotes,
-      status: ecStatus
+      status: ecStatus,
+      method: ecStatus === 'PAID' ? ecMethod : undefined
     });
     setIsSavingExtra(false);
 
@@ -316,6 +319,8 @@ export default function AlumnosUI({
       setEcNotes('');
       setSelectedCatalogItemId('');
       setCustomItemName('');
+      setEcStatus('UNPAID');
+      setEcMethod('TRANSFERENCIA');
     } else {
       alert('Error al registrar cargo extra: ' + result.error);
     }
@@ -1057,7 +1062,7 @@ export default function AlumnosUI({
                     </div>
                   )}
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: ecStatus === 'PAID' ? '1fr 1fr 1fr' : '1fr 1fr', gap: '0.75rem', marginBottom: '0.75rem' }}>
                     <div>
                       <label style={{ fontSize: '0.7rem', color: 'var(--text-dim)', display: 'block', marginBottom: '0.25rem', fontWeight: 600 }}>Monto ($)</label>
                       <input 
@@ -1082,6 +1087,23 @@ export default function AlumnosUI({
                         <option value="PAID">PAGADO</option>
                       </select>
                     </div>
+
+                    {ecStatus === 'PAID' && (
+                      <div>
+                        <label style={{ fontSize: '0.7rem', color: 'var(--text-dim)', display: 'block', marginBottom: '0.25rem', fontWeight: 600 }}>Método</label>
+                        <select 
+                          className="filter-select" 
+                          style={{ width: '100%', margin: 0, height: '38px' }}
+                          value={ecMethod} 
+                          onChange={e => setEcMethod(e.target.value)}
+                        >
+                          <option value="TRANSFERENCIA">TRANSFERENCIA</option>
+                          <option value="EFECTIVO">EFECTIVO</option>
+                          <option value="MP">MP</option>
+                          <option value="OTRO">OTRO</option>
+                        </select>
+                      </div>
+                    )}
                   </div>
 
                   <div style={{ marginBottom: '0.75rem' }}>
@@ -1135,8 +1157,23 @@ export default function AlumnosUI({
                               <span className="badge badge-secondary" style={{ fontSize: '0.65rem', padding: '0.15rem 0.35rem' }}>{charge.rubro}</span>
                               <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>{charge.item_name}</span>
                             </div>
-                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                              Vencimiento: {charge.due_date} {charge.notes && `· Notas: ${charge.notes}`}
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                              <span>Vencimiento: {charge.due_date}</span>
+                              {charge.notes && <span>· Notas: {charge.notes}</span>}
+                              {charge.status === 'PAID' && (
+                                <span className="badge" style={{ 
+                                  background: charge.payment_method === 'EFECTIVO' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(96, 165, 250, 0.1)', 
+                                  color: charge.payment_method === 'EFECTIVO' ? 'var(--success)' : '#60a5fa',
+                                  fontSize: '0.65rem',
+                                  padding: '0.1rem 0.3rem',
+                                  border: `1px solid ${charge.payment_method === 'EFECTIVO' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(96, 165, 250, 0.2)'}`,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.15rem'
+                                }}>
+                                  💵 {charge.payment_method || 'TRANSFERENCIA'}
+                                </span>
+                              )}
                             </div>
                           </div>
                           

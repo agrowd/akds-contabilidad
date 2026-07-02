@@ -411,21 +411,57 @@ export async function addExtraCharge(chargeData: {
     due_date?: string;
     notes?: string;
     status?: string;
+    method?: string;
 }) {
     const db = await getDb();
-    const { student_id, rubro, item_name, amount, due_date, notes, status } = chargeData;
+    const { student_id, rubro, item_name, amount, due_date, notes, status, method } = chargeData;
     const finalDueDate = due_date || new Date().toISOString().split('T')[0];
     const finalStatus = status || 'UNPAID';
 
     try {
-        await db.run(
+        await db.run('BEGIN TRANSACTION');
+
+        const result = await db.run(
             `INSERT INTO student_extra_charges (student_id, rubro, item_name, amount, due_date, status, notes)
              VALUES (?, ?, ?, ?, ?, ?, ?)`,
             [student_id, rubro, item_name, amount, finalDueDate, finalStatus, notes || '']
         );
+
+        const charge_id = result.lastID;
+
+        if (finalStatus === 'PAID') {
+            const paymentDate = new Date().toISOString().split('T')[0];
+            const parts = finalDueDate.split('-');
+            const monthCovered = `${parts[0] || new Date().getFullYear()}-${parts[1] || '01'}-01`;
+            const info = `Pago de cargo especial: ${item_name} ${notes ? `(${notes})` : ''}`.trim();
+            const payMethod = method || 'TRANSFERENCIA';
+            
+            const pDate = new Date(paymentDate);
+            const dueDateObj = new Date(finalDueDate);
+            const delayDays = Math.floor((pDate.getTime() - dueDateObj.getTime()) / (1000 * 60 * 60 * 24));
+            
+            await db.run(
+              `INSERT INTO payments (
+                student_id, payment_date, month_covered, amount_paid, month_value,
+                estado, rubro, method, receipt, due_date, balance, delay_days, info
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                student_id, paymentDate, monthCovered, amount, amount,
+                'ABONADA', rubro, payMethod, `CE-${charge_id}`, finalDueDate, 0, delayDays, info
+              ]
+            );
+        }
+
+        await db.run('COMMIT');
+
         revalidatePath('/alumnos');
+        revalidatePath('/cobros');
+        revalidatePath('/');
         return { success: true };
     } catch (error: any) {
+        try {
+            await db.run('ROLLBACK');
+        } catch (e) {}
         console.error('Error adding extra charge:', error);
         return { success: false, error: error.message };
     }

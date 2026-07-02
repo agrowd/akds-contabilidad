@@ -22,9 +22,11 @@ export default async function ConceptosEspecialesPage() {
 
   // Extra charges assigned to all students
   const extraCharges = await db.all(`
-    SELECT id, student_id, rubro, item_name, amount, due_date, status, notes
-    FROM student_extra_charges
-    ORDER BY due_date DESC, id DESC
+    SELECT ec.id, ec.student_id, ec.rubro, ec.item_name, ec.amount, ec.due_date, ec.status, ec.notes,
+           p.method as payment_method
+    FROM student_extra_charges ec
+    LEFT JOIN payments p ON p.receipt = 'CE-' || CAST(ec.id AS TEXT) AND p.student_id = ec.student_id
+    ORDER BY ec.due_date DESC, ec.id DESC
   `);
 
   const extraChargesByStudent: Record<number, typeof extraCharges> = {};
