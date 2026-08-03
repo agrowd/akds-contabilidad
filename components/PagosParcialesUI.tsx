@@ -61,6 +61,8 @@ export default function PagosParcialesUI({ students, partialStatuses, paymentsBy
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [activeTab, setActiveTab] = useState<'CUOTAS' | 'ESPECIALES'>('CUOTAS');
   
+  const [rubroFilter, setRubroFilter] = useState('ALL');
+  
   // Modal suggested pre-fills
   const [modalSuggestedRubro, setModalSuggestedRubro] = useState('');
   const [modalSuggestedAmount, setModalSuggestedAmount] = useState('');
@@ -78,6 +80,15 @@ export default function PagosParcialesUI({ students, partialStatuses, paymentsBy
   const categories = useMemo(() => {
     return [...new Set(students.map(s => s.category))].sort();
   }, [students]);
+
+  // Available rubros
+  const availableRubros = useMemo(() => {
+    const set = new Set<string>(['FICHAJE', 'INDUMENTARIA', 'CARNET', 'MICRO']);
+    extraCharges.forEach(ec => {
+      if (ec.rubro) set.add(ec.rubro);
+    });
+    return Array.from(set).sort();
+  }, [extraCharges]);
 
   // Process and compute partial payment data
   const partialPaymentsData = useMemo(() => {
@@ -176,7 +187,10 @@ export default function PagosParcialesUI({ students, partialStatuses, paymentsBy
 
     if (search) {
       const term = search.toUpperCase();
-      result = result.filter(item => item.student_name.toUpperCase().includes(term));
+      result = result.filter(item => 
+        item.student_name.toUpperCase().includes(term) ||
+        (item.month || '').toUpperCase().includes(term)
+      );
     }
 
     if (categoryFilter !== 'ALL') {
@@ -192,15 +206,24 @@ export default function PagosParcialesUI({ students, partialStatuses, paymentsBy
 
     if (search) {
       const term = search.toUpperCase();
-      result = result.filter(item => item.student_name.toUpperCase().includes(term));
+      result = result.filter(item => 
+        item.student_name.toUpperCase().includes(term) ||
+        (item.rubro || '').toUpperCase().includes(term) ||
+        (item.item_name || '').toUpperCase().includes(term) ||
+        (item.notes || '').toUpperCase().includes(term)
+      );
     }
 
     if (categoryFilter !== 'ALL') {
       result = result.filter(item => item.student_category === categoryFilter);
     }
 
+    if (rubroFilter !== 'ALL') {
+      result = result.filter(item => item.rubro === rubroFilter);
+    }
+
     return result;
-  }, [specialPaymentsData, search, categoryFilter]);
+  }, [specialPaymentsData, search, categoryFilter, rubroFilter]);
 
   // Compute stats based on the active tab
   const activeStats = useMemo(() => {
@@ -306,12 +329,12 @@ export default function PagosParcialesUI({ students, partialStatuses, paymentsBy
 
       {/* FILTERS BAR */}
       <div className="filters-bar">
-        <div className="search-box">
+        <div className="search-box" style={{ flex: 1, minWidth: '220px' }}>
           <span className="search-icon">🔍</span>
           <input
             type="text"
             className="search-input"
-            placeholder="Buscar por nombre de alumno..."
+            placeholder="Buscar por alumno, concepto, rubro..."
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -327,6 +350,19 @@ export default function PagosParcialesUI({ students, partialStatuses, paymentsBy
             <option key={cat} value={cat}>{cat}</option>
           ))}
         </select>
+        
+        {activeTab === 'ESPECIALES' && (
+          <select 
+            className="filter-select" 
+            value={rubroFilter} 
+            onChange={e => setRubroFilter(e.target.value)}
+          >
+            <option value="ALL">Todos los rubros</option>
+            {availableRubros.map(r => (
+              <option key={r} value={r}>{r}</option>
+            ))}
+          </select>
+        )}
         
         <div style={{ marginLeft: 'auto', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
           Mostrando {activeTab === 'CUOTAS' ? filtered.length : filteredSpecials.length} registros

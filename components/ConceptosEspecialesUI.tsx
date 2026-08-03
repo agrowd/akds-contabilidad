@@ -50,7 +50,20 @@ export default function ConceptosEspecialesUI({
 }: ConceptosEspecialesUIProps) {
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
+  const [rubroFilter, setRubroFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState('ALL');
   const [selectedStudentId, setSelectedStudentId] = useState<number | null>(null);
+
+  // Available rubros
+  const availableRubros = useMemo(() => {
+    const set = new Set<string>(['FICHAJE', 'INDUMENTARIA', 'CARNET', 'MICRO']);
+    Object.values(extraChargesByStudent).forEach(charges => {
+      charges.forEach(ec => {
+        if (ec.rubro) set.add(ec.rubro);
+      });
+    });
+    return Array.from(set).sort();
+  }, [extraChargesByStudent]);
 
   // Form states for extra charges
   const [ecRubro, setEcRubro] = useState('FICHAJE');
@@ -105,13 +118,41 @@ export default function ConceptosEspecialesUI({
     let list = students;
     if (search) {
       const term = search.toUpperCase();
-      list = list.filter(s => s.name.toUpperCase().includes(term));
+      list = list.filter(s => {
+        const nameMatch = s.name.toUpperCase().includes(term);
+        const charges = extraChargesByStudent[s.id] || [];
+        const chargeMatch = charges.some(ec => 
+          (ec.rubro || '').toUpperCase().includes(term) ||
+          (ec.item_name || '').toUpperCase().includes(term) ||
+          (ec.notes || '').toUpperCase().includes(term)
+        );
+        return nameMatch || chargeMatch;
+      });
     }
     if (categoryFilter !== 'ALL') {
       list = list.filter(s => s.category === categoryFilter);
     }
+    if (rubroFilter !== 'ALL') {
+      list = list.filter(s => {
+        const charges = extraChargesByStudent[s.id] || [];
+        return charges.some(ec => ec.rubro === rubroFilter);
+      });
+    }
+    if (statusFilter !== 'ALL') {
+      list = list.filter(s => {
+        const charges = extraChargesByStudent[s.id] || [];
+        if (statusFilter === 'PENDIENTE') {
+          return charges.some(ec => ec.status !== 'PAID');
+        } else if (statusFilter === 'PAID') {
+          return charges.length > 0 && charges.every(ec => ec.status === 'PAID');
+        } else if (statusFilter === 'CON_CARGOS') {
+          return charges.length > 0;
+        }
+        return true;
+      });
+    }
     return list;
-  }, [students, search, categoryFilter]);
+  }, [students, search, categoryFilter, rubroFilter, statusFilter, extraChargesByStudent]);
 
   const selectedStudent = selectedStudentId 
     ? students.find(s => s.id === selectedStudentId) 
@@ -258,25 +299,49 @@ export default function ConceptosEspecialesUI({
         <div className="glass table-wrapper" style={{ padding: '1.25rem' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1.25rem' }}>
             <h3 className="table-title">Lista de Alumnos</h3>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '0.5rem', marginBottom: '0.5rem' }}>
               <input
                 type="text"
-                placeholder="🔍 Buscar alumno..."
+                placeholder="🔍 Buscar por nombre, concepto..."
                 className="search-input"
-                style={{ flex: 1, margin: 0 }}
+                style={{ margin: 0 }}
                 value={search}
                 onChange={e => setSearch(e.target.value)}
               />
               <select
                 className="filter-select"
-                style={{ width: '160px', margin: 0 }}
+                style={{ margin: 0 }}
                 value={categoryFilter}
                 onChange={e => setCategoryFilter(e.target.value)}
               >
-                <option value="ALL">Categorías</option>
+                <option value="ALL">Todas las categorías</option>
                 {categories.map(c => (
                   <option key={c} value={c}>{c}</option>
                 ))}
+              </select>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+              <select
+                className="filter-select"
+                style={{ margin: 0 }}
+                value={rubroFilter}
+                onChange={e => setRubroFilter(e.target.value)}
+              >
+                <option value="ALL">Todos los Rubros</option>
+                {availableRubros.map(r => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
+              <select
+                className="filter-select"
+                style={{ margin: 0 }}
+                value={statusFilter}
+                onChange={e => setStatusFilter(e.target.value)}
+              >
+                <option value="ALL">Todos los Estados</option>
+                <option value="PENDIENTE">Con Impagos / Pendientes</option>
+                <option value="PAID">Al día / Todo Pagado</option>
+                <option value="CON_CARGOS">Alumnos con Cargos</option>
               </select>
             </div>
           </div>
@@ -300,7 +365,18 @@ export default function ConceptosEspecialesUI({
                       onClick={() => setSelectedStudentId(isSelected ? null : s.id)}
                       style={{ cursor: 'pointer', background: isSelected ? 'rgba(0, 255, 136, 0.05)' : undefined }}
                     >
-                      <td style={{ fontWeight: 600 }}>{s.name}</td>
+                      <td style={{ fontWeight: 600 }}>
+                        <div>{s.name}</div>
+                        {extraChargesByStudent[s.id] && extraChargesByStudent[s.id].length > 0 && (
+                          <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.2rem' }}>
+                            {Array.from(new Set(extraChargesByStudent[s.id].map(ec => ec.rubro))).map(r => (
+                              <span key={r} style={{ fontSize: '0.58rem', padding: '0.05rem 0.3rem', borderRadius: '4px', background: 'rgba(255, 255, 255, 0.08)', color: 'var(--text-dim)', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                                {r}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </td>
                       <td><span className="category-badge">{s.category}</span></td>
                       <td className="text-center">
                         {pendingCount > 0 ? (

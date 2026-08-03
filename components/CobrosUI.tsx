@@ -63,7 +63,9 @@ export default function CobrosUI({ payments, stats, monthlySummary, rubros, meth
       const term = search.toUpperCase();
       result = result.filter(p => 
         (p.student_name || 'ADMINISTRACIÓN').toUpperCase().includes(term) || 
-        (p.info || '').toUpperCase().includes(term)
+        (p.info || '').toUpperCase().includes(term) ||
+        (p.rubro || '').toUpperCase().includes(term) ||
+        (p.receipt || '').toUpperCase().includes(term)
       );
     }
     if (rubroFilter !== 'ALL') result = result.filter(p => p.rubro === rubroFilter);
@@ -196,7 +198,7 @@ export default function CobrosUI({ payments, stats, monthlySummary, rubros, meth
       <div className="filters-bar">
         <input
           type="text"
-          placeholder="🔍 Buscar por alumno..."
+          placeholder="🔍 Buscar por alumno, concepto, rubro..."
           className="search-input"
           value={search}
           onChange={e => setSearch(e.target.value)}

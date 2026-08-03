@@ -99,6 +99,7 @@ export default function AlumnosUI({
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
+  const [rubroFilter, setRubroFilter] = useState('ALL');
   const [selectedStudent, setSelectedStudent] = useState<number | null>(initialSelectedStudentId || null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -434,11 +435,30 @@ export default function AlumnosUI({
     });
   }, [students, statusMap]);
 
+  const availableRubros = useMemo(() => {
+    const set = new Set<string>(['FICHAJE', 'INDUMENTARIA', 'CARNET', 'MICRO']);
+    Object.values(extraChargesByStudent).forEach(charges => {
+      charges.forEach(ec => {
+        if (ec.rubro) set.add(ec.rubro);
+      });
+    });
+    return Array.from(set).sort();
+  }, [extraChargesByStudent]);
+
   const filtered = useMemo(() => {
     let result = computedStudents;
     if (search) {
       const term = search.toUpperCase();
-      result = result.filter(s => s.name.toUpperCase().includes(term));
+      result = result.filter(s => {
+        const nameMatch = s.name.toUpperCase().includes(term);
+        const charges = extraChargesByStudent[s.id] || [];
+        const chargeMatch = charges.some(ec => 
+          (ec.rubro || '').toUpperCase().includes(term) ||
+          (ec.item_name || '').toUpperCase().includes(term) ||
+          (ec.notes || '').toUpperCase().includes(term)
+        );
+        return nameMatch || chargeMatch;
+      });
     }
     if (categoryFilter !== 'ALL') {
       result = result.filter(s => s.category === categoryFilter);
@@ -446,8 +466,14 @@ export default function AlumnosUI({
     if (statusFilter !== 'ALL') {
       result = result.filter(s => s.status === statusFilter);
     }
+    if (rubroFilter !== 'ALL') {
+      result = result.filter(s => {
+        const charges = extraChargesByStudent[s.id] || [];
+        return charges.some(ec => ec.rubro === rubroFilter);
+      });
+    }
     return result;
-  }, [computedStudents, search, categoryFilter, statusFilter]);
+  }, [computedStudents, search, categoryFilter, statusFilter, rubroFilter, extraChargesByStudent]);
 
   const handleExportExcel = () => {
     const data = filtered.map(s => ({
@@ -503,8 +529,9 @@ export default function AlumnosUI({
       <div className="filters-bar">
         <input
           type="text"
-          placeholder="🔍 Buscar por nombre..."
+          placeholder="🔍 Buscar por nombre, concepto, indumentaria, fichaje..."
           className="search-input"
+          style={{ flex: 1, minWidth: '220px' }}
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
@@ -516,6 +543,17 @@ export default function AlumnosUI({
           <option value="ALL">Todas las categorías</option>
           {categories.map(c => (
             <option key={c} value={c}>{c}</option>
+          ))}
+        </select>
+        <select
+          className="filter-select"
+          value={rubroFilter}
+          onChange={e => setRubroFilter(e.target.value)}
+          style={{ marginLeft: '0.5rem' }}
+        >
+          <option value="ALL">Todos los conceptos / rubros</option>
+          {availableRubros.map(r => (
+            <option key={r} value={r}>{r}</option>
           ))}
         </select>
         <select
