@@ -26,6 +26,7 @@ interface RevenueItem {
   rubro?: string;
   count: number;
   total: number;
+  total_pending?: number;
 }
 
 interface DashboardUIProps {
@@ -139,10 +140,12 @@ export default function DashboardUI({
               >
                 <div>
                   <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--primary)' }}>{item.rubro}</span>
-                  <span className="text-dim" style={{ fontSize: '0.72rem', marginLeft: '0.5rem' }}>{item.count} pagos</span>
+                  <span className="text-dim" style={{ fontSize: '0.72rem', marginLeft: '0.5rem' }}>
+                    {item.count} ops {item.total_pending ? `($${item.total_pending.toLocaleString()} pend.)` : ''}
+                  </span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <span style={{ fontSize: '0.9rem', fontWeight: 700 }}>${(item.total || 0).toLocaleString()}</span>
+                  <span style={{ fontSize: '0.9rem', fontWeight: 700 }}>${((item.total || 0) + (item.total_pending || 0)).toLocaleString()}</span>
                   <span style={{ fontSize: '0.75rem', opacity: 0.5 }}>→</span>
                 </div>
               </Link>

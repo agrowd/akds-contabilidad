@@ -22,31 +22,107 @@ interface Payment {
   info: string;
 }
 
+interface PendingExtraCharge {
+  id: number;
+  student_id: number;
+  rubro: string;
+  item_name: string;
+  amount: number;
+  due_date: string;
+  status: string;
+  notes: string;
+  student_name: string | null;
+  category: string | null;
+}
+
+interface UnifiedItem {
+  id: string;
+  type: 'PAYMENT' | 'PENDING_CHARGE';
+  student_id: number | null;
+  student_name: string;
+  category: string;
+  date: string;
+  concept: string;
+  rubro: string;
+  method: string;
+  receipt: string;
+  amount: number;
+  status: 'COBRADO' | 'PENDIENTE';
+}
+
 interface RevenueRubroUIProps {
   selectedRubro: string;
   rubros: string[];
   payments: Payment[];
+  pendingExtraCharges?: PendingExtraCharge[];
   stats: {
-    count: number;
-    total: number;
-    total_efectivo: number;
-    total_digital: number;
+    total_paid: number;
+    count_paid: number;
+    total_pending: number;
+    count_pending: number;
   };
 }
 
-export default function RevenueRubroUI({ selectedRubro, rubros, payments, stats }: RevenueRubroUIProps) {
+export default function RevenueRubroUI({
+  selectedRubro,
+  rubros,
+  payments,
+  pendingExtraCharges = [],
+  stats
+}: RevenueRubroUIProps) {
   const router = useRouter();
   const [search, setSearch] = useState('');
   const [methodFilter, setMethodFilter] = useState('ALL');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState('ALL');
 
-  // Extract student categories present in these payments
+  // Combine payments and pending extra charges into a unified list
+  const unifiedItems = useMemo(() => {
+    const list: UnifiedItem[] = [];
+
+    payments.forEach(p => {
+      list.push({
+        id: `P-${p.id}`,
+        type: 'PAYMENT',
+        student_id: p.student_id,
+        student_name: p.student_name || 'ADMINISTRACIÓN',
+        category: p.category || 'ADMINISTRACIÓN',
+        date: p.payment_date,
+        concept: p.month_covered ? p.month_covered.substring(0, 7) : p.info || p.rubro,
+        rubro: p.rubro,
+        method: p.method || 'TRANSFERENCIA',
+        receipt: p.receipt || '-',
+        amount: p.amount_paid,
+        status: 'COBRADO'
+      });
+    });
+
+    pendingExtraCharges.forEach(ec => {
+      list.push({
+        id: `EC-${ec.id}`,
+        type: 'PENDING_CHARGE',
+        student_id: ec.student_id,
+        student_name: ec.student_name || 'ALUMNO',
+        category: ec.category || 'SIN CATEGORÍA',
+        date: ec.due_date || '-',
+        concept: ec.item_name || ec.rubro,
+        rubro: ec.rubro,
+        method: 'PENDIENTE',
+        receipt: `CE-${ec.id}`,
+        amount: ec.amount,
+        status: 'PENDIENTE'
+      });
+    });
+
+    // Sort by date DESC
+    return list.sort((a, b) => b.date.localeCompare(a.date));
+  }, [payments, pendingExtraCharges]);
+
+  // Extract student categories present in these items
   const studentCategories = useMemo(() => {
-    const cats = payments
-      .map(p => p.category || 'ADMINISTRACIÓN')
-      .filter(Boolean);
+    const cats = unifiedItems.map(item => item.category).filter(Boolean);
     return [...new Set(cats)].sort();
-  }, [payments]);
+  }, [unifiedItems]);
 
   // Handle rubro dropdown change
   const handleRubroChange = (rubro: string) => {
@@ -57,52 +133,65 @@ export default function RevenueRubroUI({ selectedRubro, rubros, payments, stats 
     }
   };
 
-  // Filter payments
-  const filteredPayments = useMemo(() => {
-    let result = payments;
+  // Filter items
+  const filteredItems = useMemo(() => {
+    let result = unifiedItems;
 
     if (search) {
       const term = search.toUpperCase();
-      result = result.filter(p => 
-        (p.student_name || 'ADMINISTRACIÓN').toUpperCase().includes(term) ||
-        (p.info || '').toUpperCase().includes(term) ||
-        (p.receipt || '').toUpperCase().includes(term)
+      result = result.filter(item => 
+        item.student_name.toUpperCase().includes(term) ||
+        item.concept.toUpperCase().includes(term) ||
+        item.receipt.toUpperCase().includes(term) ||
+        item.rubro.toUpperCase().includes(term)
       );
+    }
+
+    if (statusFilter !== 'ALL') {
+      result = result.filter(item => item.status === statusFilter);
     }
 
     if (methodFilter !== 'ALL') {
       if (methodFilter === 'EFECTIVO') {
-        result = result.filter(p => (p.method || '').toUpperCase() === 'EFECTIVO');
+        result = result.filter(item => item.method.toUpperCase() === 'EFECTIVO');
       } else if (methodFilter === 'DIGITAL') {
-        result = result.filter(p => ['MP - TRANSFERENCIA', 'TRANSFERENCIA', 'MP'].includes((p.method || '').toUpperCase()));
+        result = result.filter(item => ['MP - TRANSFERENCIA', 'TRANSFERENCIA', 'MP'].includes(item.method.toUpperCase()));
       }
     }
 
     if (categoryFilter !== 'ALL') {
-      result = result.filter(p => (p.category || 'ADMINISTRACIÓN') === categoryFilter);
+      result = result.filter(item => item.category === categoryFilter);
     }
 
     return result;
-  }, [payments, search, methodFilter, categoryFilter]);
+  }, [unifiedItems, search, statusFilter, methodFilter, categoryFilter]);
 
   // Recalculate stats for the filtered set
   const filteredStats = useMemo(() => {
-    const total = filteredPayments.reduce((sum, p) => sum + (p.amount_paid || 0), 0);
-    const count = filteredPayments.length;
-    const cash = filteredPayments
-      .filter(p => (p.method || '').toUpperCase() === 'EFECTIVO')
-      .reduce((sum, p) => sum + (p.amount_paid || 0), 0);
-    const digital = filteredPayments
-      .filter(p => ['MP - TRANSFERENCIA', 'TRANSFERENCIA', 'MP'].includes((p.method || '').toUpperCase()))
-      .reduce((sum, p) => sum + (p.amount_paid || 0), 0);
+    const totalPaid = filteredItems.filter(i => i.status === 'COBRADO').reduce((sum, i) => sum + i.amount, 0);
+    const countPaid = filteredItems.filter(i => i.status === 'COBRADO').length;
+    
+    const totalPending = filteredItems.filter(i => i.status === 'PENDIENTE').reduce((sum, i) => sum + i.amount, 0);
+    const countPending = filteredItems.filter(i => i.status === 'PENDIENTE').length;
+
+    const cash = filteredItems
+      .filter(i => i.status === 'COBRADO' && i.method.toUpperCase() === 'EFECTIVO')
+      .reduce((sum, i) => sum + i.amount, 0);
+      
+    const digital = filteredItems
+      .filter(i => i.status === 'COBRADO' && ['MP - TRANSFERENCIA', 'TRANSFERENCIA', 'MP'].includes(i.method.toUpperCase()))
+      .reduce((sum, i) => sum + i.amount, 0);
 
     return {
-      total,
-      count,
+      totalPaid,
+      countPaid,
+      totalPending,
+      countPending,
+      totalProjected: totalPaid + totalPending,
       cash,
       digital
     };
-  }, [filteredPayments]);
+  }, [filteredItems]);
 
   return (
     <div>
@@ -110,7 +199,7 @@ export default function RevenueRubroUI({ selectedRubro, rubros, payments, stats 
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
           <h1 className="page-title title-gradient">Revenue por Rubro</h1>
-          <p className="page-subtitle">Desglose y listado de transacciones por categoría de cobro</p>
+          <p className="page-subtitle">Desglose y listado completo de transacciones y cargos pendientes por rubro</p>
         </div>
         <Link href="/" className="btn btn-secondary glass-hover" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
           ← Volver al Overview
@@ -125,7 +214,7 @@ export default function RevenueRubroUI({ selectedRubro, rubros, payments, stats 
             className="filter-select"
             value={selectedRubro}
             onChange={e => handleRubroChange(e.target.value)}
-            style={{ minWidth: '240px', margin: 0 }}
+            style={{ minWidth: '260px', margin: 0 }}
           >
             <option value="ALL">[ TODOS LOS RUBROS ]</option>
             {rubros.map(r => (
@@ -136,48 +225,58 @@ export default function RevenueRubroUI({ selectedRubro, rubros, payments, stats 
 
         <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', margin: 0, padding: 0 }}>
           <div className="stat-card glass" style={{ background: 'rgba(255,255,255,0.02)' }}>
-            <p className="stat-label">Total Recaudado</p>
-            <p className="stat-value" style={{ color: 'var(--primary)' }}>
-              ${filteredStats.total.toLocaleString()}
-            </p>
-            <p className="stat-label">De un total de {stats.total.toLocaleString()} original</p>
-          </div>
-          <div className="stat-card glass" style={{ background: 'rgba(255,255,255,0.02)' }}>
-            <p className="stat-label">Recaudado en Efectivo</p>
+            <p className="stat-label">Total Recaudado (Cobrado)</p>
             <p className="stat-value" style={{ color: 'var(--success)' }}>
-              ${filteredStats.cash.toLocaleString()}
+              ${filteredStats.totalPaid.toLocaleString()}
             </p>
-            <p className="stat-label">En billetes físicos</p>
+            <p className="stat-label">{filteredStats.countPaid} pagos cobrados</p>
           </div>
           <div className="stat-card glass" style={{ background: 'rgba(255,255,255,0.02)' }}>
-            <p className="stat-label">MercadoPago / Transf.</p>
-            <p className="stat-value" style={{ color: 'var(--secondary)' }}>
-              ${filteredStats.digital.toLocaleString()}
+            <p className="stat-label">Total Pendiente (Por Cobrar)</p>
+            <p className="stat-value" style={{ color: '#f59e0b' }}>
+              ${filteredStats.totalPending.toLocaleString()}
             </p>
-            <p className="stat-label">Medios electrónicos</p>
+            <p className="stat-label">{filteredStats.countPending} cargos pendientes</p>
           </div>
           <div className="stat-card glass" style={{ background: 'rgba(255,255,255,0.02)' }}>
-            <p className="stat-label">Cant. Transacciones</p>
-            <p className="stat-value">
-              {filteredStats.count}
+            <p className="stat-label">Total Proyectado del Rubro</p>
+            <p className="stat-value" style={{ color: 'var(--primary)' }}>
+              ${filteredStats.totalProjected.toLocaleString()}
             </p>
-            <p className="stat-label">Operaciones filtradas</p>
+            <p className="stat-label">Cobrado + Deuda activa</p>
+          </div>
+          <div className="stat-card glass" style={{ background: 'rgba(255,255,255,0.02)' }}>
+            <p className="stat-label">Efectivo vs Digital (Cobrados)</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', marginTop: '0.3rem' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--success)', fontWeight: 600 }}>💵 ${filteredStats.cash.toLocaleString()} (Efe)</span>
+              <span style={{ fontSize: '0.85rem', color: '#60a5fa', fontWeight: 600 }}>💳 ${filteredStats.digital.toLocaleString()} (Dig)</span>
+            </div>
           </div>
         </div>
       </div>
 
       {/* FILTERS BAR */}
       <div className="filters-bar">
-        <div className="search-box">
+        <div className="search-box" style={{ flex: 1, minWidth: '220px' }}>
           <span className="search-icon">🔍</span>
           <input
             type="text"
             className="search-input"
-            placeholder="Buscar por alumno, recibo o detalle..."
+            placeholder="Buscar por alumno, concepto, recibo..."
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
         </div>
+
+        <select 
+          className="filter-select"
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+        >
+          <option value="ALL">Todos los Estados</option>
+          <option value="COBRADO">Solo Cobrados</option>
+          <option value="PENDIENTE">Solo Pendientes / Impagos</option>
+        </select>
 
         <select 
           className="filter-select"
@@ -201,16 +300,16 @@ export default function RevenueRubroUI({ selectedRubro, rubros, payments, stats 
         </select>
 
         <div style={{ marginLeft: 'auto', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-          Mostrando {filteredPayments.length} pagos
+          Mostrando {filteredItems.length} registros
         </div>
       </div>
 
       {/* TABLE LIST */}
       <div className="section">
-        {filteredPayments.length === 0 ? (
+        {filteredItems.length === 0 ? (
           <div className="glass" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
             <span style={{ fontSize: '2.5rem', display: 'block', marginBottom: '1rem' }}>💸</span>
-            <h3>No se encontraron registros de cobros</h3>
+            <h3>No se encontraron registros de cobros o cargos</h3>
             <p style={{ fontSize: '0.9rem', marginTop: '0.5rem' }}>Pruebe cambiando los filtros o el rubro seleccionado.</p>
           </div>
         ) : (
@@ -219,44 +318,60 @@ export default function RevenueRubroUI({ selectedRubro, rubros, payments, stats 
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Fecha</th>
+                    <th>Fecha / Venc.</th>
                     <th>Alumno</th>
                     <th>Academia / Cat.</th>
-                    <th>Concepto / Mes</th>
+                    <th>Concepto / Ítem</th>
                     <th>Rubro</th>
                     <th>Método</th>
                     <th>Comprobante</th>
+                    <th className="text-center">Estado</th>
                     <th className="text-right">Monto</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredPayments.map(p => (
-                    <tr key={p.id} className="payment-row-hover">
-                      <td style={{ whiteSpace: 'nowrap', fontSize: '0.85rem' }}>{p.payment_date}</td>
+                  {filteredItems.map(item => (
+                    <tr key={item.id} className="payment-row-hover">
+                      <td style={{ whiteSpace: 'nowrap', fontSize: '0.85rem' }}>{item.date}</td>
                       <td style={{ fontWeight: 600 }}>
-                        {p.student_id ? (
-                          <Link href={`/alumnos?id=${p.student_id}`} style={{ color: 'var(--primary)', textDecoration: 'none' }} className="hover-underline">
-                            {p.student_name}
+                        {item.student_id ? (
+                          <Link href={`/alumnos?id=${item.student_id}`} style={{ color: 'var(--primary)', textDecoration: 'none' }} className="hover-underline">
+                            {item.student_name}
                           </Link>
                         ) : (
                           <span style={{ color: 'var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '0.2rem' }}>
-                            ⚙️ Guido (Admin)
+                            ⚙️ {item.student_name}
                           </span>
                         )}
                       </td>
                       <td>
                         <span className="category-badge">
-                          {p.category || 'ADMINISTRACIÓN'}
+                          {item.category}
                         </span>
                       </td>
+                      <td style={{ fontSize: '0.85rem' }}>{item.concept}</td>
+                      <td style={{ fontSize: '0.85rem', color: 'var(--text-dim)' }}>{item.rubro}</td>
                       <td style={{ fontSize: '0.85rem' }}>
-                        {p.month_covered ? p.month_covered.substring(0, 7) : p.info || '-'}
+                        {item.status === 'COBRADO' ? (
+                          item.method.toUpperCase() === 'EFECTIVO' ? '💵 EFECTIVO' : '💳 ' + item.method
+                        ) : (
+                          <span style={{ color: 'var(--text-muted)' }}>-</span>
+                        )}
                       </td>
-                      <td style={{ fontSize: '0.85rem', color: 'var(--text-dim)' }}>{p.rubro}</td>
-                      <td style={{ fontSize: '0.85rem' }}>{p.method}</td>
-                      <td style={{ fontSize: '0.85rem' }}><code>{p.receipt || '-'}</code></td>
-                      <td className="text-right" style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--success)' }}>
-                        ${p.amount_paid.toLocaleString()}
+                      <td style={{ fontSize: '0.85rem' }}><code>{item.receipt}</code></td>
+                      <td className="text-center">
+                        {item.status === 'COBRADO' ? (
+                          <span className="badge badge-success" style={{ fontSize: '0.75rem' }}>✅ COBRADO</span>
+                        ) : (
+                          <span className="badge badge-warning" style={{ fontSize: '0.75rem' }}>⏳ PENDIENTE</span>
+                        )}
+                      </td>
+                      <td className="text-right" style={{ 
+                        fontWeight: 700, 
+                        fontSize: '0.95rem', 
+                        color: item.status === 'COBRADO' ? 'var(--success)' : '#f59e0b' 
+                      }}>
+                        ${item.amount.toLocaleString()}
                       </td>
                     </tr>
                   ))}

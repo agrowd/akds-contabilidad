@@ -107,14 +107,39 @@ export default async function DashboardPage() {
     GROUP BY method
   `);
 
-  // 7. REVENUE BY RUBRO
-  const revenueByRubro = await db.all(`
-    SELECT rubro, COUNT(*) as count, COALESCE(SUM(amount_paid), 0) as total
-    FROM payments
-    WHERE rubro != ''
-    GROUP BY rubro
-    ORDER BY total DESC
-  `);
+  // 7. REVENUE BY RUBRO (combining payments and pending extra charges)
+  const rubrosFromPayments = await db.all("SELECT DISTINCT UPPER(TRIM(rubro)) as rubro FROM payments WHERE rubro IS NOT NULL AND TRIM(rubro) != ''");
+  const rubrosFromExtra = await db.all("SELECT DISTINCT UPPER(TRIM(rubro)) as rubro FROM student_extra_charges WHERE rubro IS NOT NULL AND TRIM(rubro) != ''");
+
+  const allRubrosSet = new Set<string>();
+  rubrosFromPayments.forEach((r: any) => { if (r.rubro) allRubrosSet.add(r.rubro); });
+  rubrosFromExtra.forEach((r: any) => { if (r.rubro) allRubrosSet.add(r.rubro); });
+
+  const revenueByRubroList = [];
+  for (const rubroName of Array.from(allRubrosSet)) {
+    const pStat = await db.get(
+      "SELECT COUNT(*) as count, COALESCE(SUM(amount_paid), 0) as total FROM payments WHERE UPPER(TRIM(rubro)) = UPPER(TRIM(?))",
+      [rubroName]
+    );
+    const ecStat = await db.get(
+      "SELECT COUNT(*) as count, COALESCE(SUM(amount), 0) as total FROM student_extra_charges WHERE status != 'PAID' AND UPPER(TRIM(rubro)) = UPPER(TRIM(?))",
+      [rubroName]
+    );
+
+    const countPaid = Number(pStat?.count || 0);
+    const totalPaid = Number(pStat?.total || 0);
+    const countPending = Number(ecStat?.count || 0);
+    const totalPending = Number(ecStat?.total || 0);
+
+    revenueByRubroList.push({
+      rubro: rubroName,
+      count: countPaid + countPending,
+      total: totalPaid,
+      total_pending: totalPending
+    });
+  }
+
+  revenueByRubroList.sort((a, b) => (b.total + b.total_pending) - (a.total + a.total_pending));
 
   return (
     <DashboardUI
@@ -124,7 +149,7 @@ export default async function DashboardPage() {
       statusMap={statusMap}
       debtors={debtors}
       revenueByMethod={revenueByMethod}
-      revenueByRubro={revenueByRubro}
+      revenueByRubro={revenueByRubroList}
     />
   );
 }
