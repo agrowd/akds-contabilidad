@@ -21,13 +21,13 @@ export default async function PagosParcialesPage() {
     WHERE status = 'PARTIAL' AND year = ?
   `, [currentYear]);
 
-  // Extra charges that are unpaid (status = 'UNPAID')
+  // Extra charges that are pending (status != 'PAID')
   const extraCharges = await db.all(`
     SELECT ec.id, ec.student_id, ec.rubro, ec.item_name, ec.amount, ec.due_date, ec.status, ec.notes,
            s.name as student_name, s.category as student_category, s.status as student_status
     FROM student_extra_charges ec
     JOIN students s ON ec.student_id = s.id
-    WHERE ec.status = 'UNPAID'
+    WHERE ec.status != 'PAID'
     ORDER BY ec.due_date DESC, ec.id DESC
   `);
 

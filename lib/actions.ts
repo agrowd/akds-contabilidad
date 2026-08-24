@@ -468,60 +468,150 @@ export async function addExtraCharge(chargeData: {
 }
 
 /**
+ * Registers an individual payment (or partial installment) for a student's extra charge.
+ */
+export async function addExtraChargePayment(charge_id: number, paymentData: {
+  amount_paid: number;
+  payment_date: string;
+  method: string;
+  receipt?: string;
+  notes?: string;
+}) {
+  const db = await getDb();
+  try {
+    await db.run('BEGIN TRANSACTION');
+    const ec = await db.get(
+      `SELECT student_id, rubro, item_name, amount, due_date, notes FROM student_extra_charges WHERE id = ?`,
+      [charge_id]
+    );
+    if (!ec) throw new Error('Cargo especial no encontrado');
+
+    const paymentDate = paymentData.payment_date || new Date().toISOString().split('T')[0];
+    const parts = (ec.due_date || paymentDate).split('-');
+    const monthCovered = `${parts[0] || new Date().getFullYear()}-${parts[1] || '01'}-01`;
+    const noteText = paymentData.notes ? `(${paymentData.notes})` : (ec.notes ? `(${ec.notes})` : '');
+    const info = `Pago de cargo especial: ${ec.item_name} ${noteText}`.trim();
+    const method = paymentData.method || 'TRANSFERENCIA';
+    const amountPaid = Number(paymentData.amount_paid);
+
+    const pDate = new Date(paymentDate);
+    const dueDate = new Date(ec.due_date || paymentDate);
+    const delayDays = Math.floor((pDate.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
+
+    // Insert the new payment transaction
+    await db.run(
+      `INSERT INTO payments (
+        student_id, payment_date, month_covered, amount_paid, month_value,
+        estado, rubro, method, receipt, due_date, balance, delay_days, info
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        ec.student_id, paymentDate, monthCovered, amountPaid, ec.amount,
+        'ABONADA', ec.rubro, method, `CE-${charge_id}`, ec.due_date || paymentDate, 0, delayDays, info
+      ]
+    );
+
+    // Sum all payments for this extra charge
+    const totalPaidRow = await db.get(
+      `SELECT COALESCE(SUM(amount_paid), 0) as total FROM payments WHERE receipt = ?`,
+      [`CE-${charge_id}`]
+    );
+    const totalPaid = Number(totalPaidRow?.total || 0);
+
+    // Update status in student_extra_charges
+    const newStatus = totalPaid >= Number(ec.amount) ? 'PAID' : 'PARTIAL';
+    await db.run(
+      `UPDATE student_extra_charges SET status = ? WHERE id = ?`,
+      [newStatus, charge_id]
+    );
+
+    await db.run('COMMIT');
+    revalidatePath('/alumnos');
+    revalidatePath('/conceptos-especiales');
+    revalidatePath('/pagos-parciales');
+    revalidatePath('/cobros');
+    revalidatePath('/revenue-rubro');
+    revalidatePath('/');
+    return { success: true };
+  } catch (error: any) {
+    try { await db.run('ROLLBACK'); } catch (e) {}
+    console.error('Error adding extra charge payment:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
  * Toggles the status of a student's extra charge and syncs it with the payments database.
  */
 export async function toggleExtraChargeStatus(charge_id: number, currentStatus: string, paymentMethod?: string) {
     const db = await getDb();
-    const newStatus = currentStatus === 'PAID' ? 'UNPAID' : 'PAID';
     try {
         await db.run('BEGIN TRANSACTION');
         
-        await db.run(
-            `UPDATE student_extra_charges SET status = ? WHERE id = ?`,
-            [newStatus, charge_id]
-        );
-        
         const ec = await db.get(
-            `SELECT student_id, rubro, item_name, amount, due_date, notes 
+            `SELECT student_id, rubro, item_name, amount, due_date, notes, status 
              FROM student_extra_charges WHERE id = ?`, 
             [charge_id]
         );
-        
-        if (newStatus === 'PAID') {
-            const paymentDate = new Date().toISOString().split('T')[0];
-            const parts = (ec.due_date || paymentDate).split('-');
-            const monthCovered = `${parts[0] || new Date().getFullYear()}-${parts[1] || '01'}-01`;
-            const info = `Pago de cargo especial: ${ec.item_name} ${ec.notes ? `(${ec.notes})` : ''}`.trim();
-            const method = paymentMethod || 'TRANSFERENCIA';
-            
-            const pDate = new Date(paymentDate);
-            const dueDate = new Date(ec.due_date || paymentDate);
-            const delayDays = Math.floor((pDate.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
-            
+        if (!ec) throw new Error('Cargo no encontrado');
+
+        const existingPayments = await db.get(
+            `SELECT COALESCE(SUM(amount_paid), 0) as total FROM payments WHERE receipt = ?`,
+            [`CE-${charge_id}`]
+        );
+        const totalPaid = Number(existingPayments?.total || 0);
+        const ecAmount = Number(ec.amount || 0);
+
+        if (currentStatus === 'PAID') {
+            // Revert to UNPAID -> remove all payments for this charge
             await db.run(
-              `INSERT INTO payments (
-                student_id, payment_date, month_covered, amount_paid, month_value,
-                estado, rubro, method, receipt, due_date, balance, delay_days, info
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              [
-                ec.student_id, paymentDate, monthCovered, ec.amount, ec.amount,
-                'ABONADA', ec.rubro, method, `CE-${charge_id}`, ec.due_date || paymentDate, 0, delayDays, info
-              ]
+                `DELETE FROM payments WHERE student_id = ? AND receipt = ?`,
+                [ec.student_id, `CE-${charge_id}`]
+            );
+            await db.run(
+                `UPDATE student_extra_charges SET status = 'UNPAID' WHERE id = ?`,
+                [charge_id]
             );
         } else {
+            // Mark fully PAID -> add payment for any remaining balance
+            const remainingBalance = Math.max(0, ecAmount - totalPaid);
+            if (remainingBalance > 0) {
+                const paymentDate = new Date().toISOString().split('T')[0];
+                const parts = (ec.due_date || paymentDate).split('-');
+                const monthCovered = `${parts[0] || new Date().getFullYear()}-${parts[1] || '01'}-01`;
+                const info = `Pago de cargo especial: ${ec.item_name} ${ec.notes ? `(${ec.notes})` : ''}`.trim();
+                const method = paymentMethod || 'TRANSFERENCIA';
+                
+                const pDate = new Date(paymentDate);
+                const dueDate = new Date(ec.due_date || paymentDate);
+                const delayDays = Math.floor((pDate.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
+                
+                await db.run(
+                  `INSERT INTO payments (
+                    student_id, payment_date, month_covered, amount_paid, month_value,
+                    estado, rubro, method, receipt, due_date, balance, delay_days, info
+                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  [
+                    ec.student_id, paymentDate, monthCovered, remainingBalance, ec.amount,
+                    'ABONADA', ec.rubro, method, `CE-${charge_id}`, ec.due_date || paymentDate, 0, delayDays, info
+                  ]
+                );
+            }
             await db.run(
-                `DELETE FROM payments WHERE student_id = ? AND receipt = ? AND rubro = ?`,
-                [ec.student_id, `CE-${charge_id}`, ec.rubro]
+                `UPDATE student_extra_charges SET status = 'PAID' WHERE id = ?`,
+                [charge_id]
             );
         }
         
         await db.run('COMMIT');
         revalidatePath('/alumnos');
+        revalidatePath('/conceptos-especiales');
+        revalidatePath('/pagos-parciales');
         revalidatePath('/cobros');
+        revalidatePath('/revenue-rubro');
         revalidatePath('/');
         return { success: true };
     } catch (error: any) {
-        await db.run('ROLLBACK');
+        try { await db.run('ROLLBACK'); } catch (e) {}
         console.error('Error toggling extra charge status:', error);
         return { success: false, error: error.message };
     }

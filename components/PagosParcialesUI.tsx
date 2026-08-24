@@ -154,6 +154,7 @@ export default function PagosParcialesUI({ students, partialStatuses, paymentsBy
       // Filter payments of this student matching the rubro (CE-id or same rubro with no monthly prefix)
       const ecPayments = studentPayments.filter(p => 
         p.receipt === `CE-${ec.id}` || 
+        (p.receipt && p.receipt.startsWith(`CE-${ec.id}`)) ||
         (p.rubro === ec.rubro && (!p.receipt || p.receipt === '' || p.receipt === '-'))
       );
 

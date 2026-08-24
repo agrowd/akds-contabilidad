@@ -34,7 +34,19 @@ export default async function RevenueRubroPage({ searchParams }: { searchParams:
   paymentQuery += ` ORDER BY p.payment_date DESC, p.id DESC`;
   const payments = await db.all(paymentQuery, paymentParams);
 
-  // 3. Fetch pending/unpaid extra charges for the rubro
+  // 3. Fetch all payments linked to extra charges to compute true remaining balances
+  const cePayments = await db.all(`SELECT receipt, amount_paid FROM payments WHERE receipt LIKE 'CE-%'`);
+  const cePaidByChargeId: Record<number, number> = {};
+  cePayments.forEach((p: any) => {
+    if (p.receipt && p.receipt.startsWith('CE-')) {
+      const cid = parseInt(p.receipt.substring(3), 10);
+      if (!isNaN(cid)) {
+        cePaidByChargeId[cid] = (cePaidByChargeId[cid] || 0) + Number(p.amount_paid || 0);
+      }
+    }
+  });
+
+  // 4. Fetch pending/unpaid extra charges for the rubro
   let extraChargesQuery = `
     SELECT 
       ec.id, ec.student_id, ec.rubro, ec.item_name, ec.amount, ec.due_date, ec.status, ec.notes,
@@ -49,9 +61,24 @@ export default async function RevenueRubroPage({ searchParams }: { searchParams:
     extraParams.push(selectedRubro);
   }
   extraChargesQuery += ` ORDER BY ec.due_date DESC, ec.id DESC`;
-  const pendingExtraCharges = await db.all(extraChargesQuery, extraParams);
+  const rawPendingExtraCharges = await db.all(extraChargesQuery, extraParams);
 
-  // 4. Calculate total stats for paid payments
+  const pendingExtraCharges = rawPendingExtraCharges.map((ec: any) => {
+    const cid = Number(ec.id);
+    const paidForThis = cePaidByChargeId[cid] || 0;
+    const amount = Number(ec.amount || 0);
+    const remaining = Math.max(0, amount - paidForThis);
+    return {
+      ...ec,
+      id: cid,
+      student_id: Number(ec.student_id),
+      amount: remaining,
+      original_amount: amount,
+      paid_amount: paidForThis
+    };
+  }).filter((ec: any) => ec.amount > 0);
+
+  // 5. Calculate total stats for paid payments
   let totalPaymentsQuery = `SELECT COALESCE(SUM(amount_paid), 0) as total, COUNT(*) as count FROM payments`;
   const totalParams: any[] = [];
   if (selectedRubro !== 'ALL') {
@@ -60,26 +87,19 @@ export default async function RevenueRubroPage({ searchParams }: { searchParams:
   }
   const paymentStats = await db.get(totalPaymentsQuery, totalParams);
 
-  // 5. Calculate total stats for pending extra charges
-  let totalPendingQuery = `SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count FROM student_extra_charges WHERE status != 'PAID'`;
-  const pendingParams: any[] = [];
-  if (selectedRubro !== 'ALL') {
-    totalPendingQuery += ` AND UPPER(TRIM(rubro)) = UPPER(TRIM(?))`;
-    pendingParams.push(selectedRubro);
-  }
-  const pendingStats = await db.get(totalPendingQuery, pendingParams);
+  const totalPendingAmount = pendingExtraCharges.reduce((sum: number, ec: any) => sum + ec.amount, 0);
 
   return (
     <RevenueRubroUI
       selectedRubro={selectedRubro}
       rubros={rubros}
       payments={payments.map((p: any) => ({ ...p, id: Number(p.id), student_id: p.student_id ? Number(p.student_id) : null }))}
-      pendingExtraCharges={pendingExtraCharges.map((ec: any) => ({ ...ec, id: Number(ec.id), student_id: Number(ec.student_id) }))}
+      pendingExtraCharges={pendingExtraCharges}
       stats={{
         total_paid: Number(paymentStats?.total || 0),
         count_paid: Number(paymentStats?.count || 0),
-        total_pending: Number(pendingStats?.total || 0),
-        count_pending: Number(pendingStats?.count || 0),
+        total_pending: totalPendingAmount,
+        count_pending: pendingExtraCharges.length,
       }}
     />
   );

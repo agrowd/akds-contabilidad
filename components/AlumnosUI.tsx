@@ -12,6 +12,7 @@ import {
   toggleMonthPayment,
   addCatalogItem,
   addExtraCharge,
+  addExtraChargePayment,
   toggleExtraChargeStatus,
   deleteExtraCharge
 } from '@/lib/actions';
@@ -28,14 +29,14 @@ interface Student {
   notes: string;
   monthly_quota: number;
   phone: string;
+  enrollment_date: string;
+  period_end_date?: string;
   payment_count: number;
   total_paid: number;
   total_balance: number;
   months_paid: number;
   months_unpaid: number;
   months_partial: number;
-  enrollment_date: string;
-  period_end_date?: string;
 }
 
 interface Payment {
@@ -60,6 +61,15 @@ interface CatalogItem {
   price: number;
 }
 
+interface PaymentMovement {
+  id: number;
+  payment_date: string;
+  amount_paid: number;
+  method: string;
+  receipt?: string;
+  info?: string;
+}
+
 interface ExtraCharge {
   id: number;
   student_id: number;
@@ -70,6 +80,10 @@ interface ExtraCharge {
   status: string;
   notes: string;
   payment_method?: string;
+  total_paid?: number;
+  remaining_balance?: number;
+  movements?: PaymentMovement[];
+  movements_count?: number;
 }
 
 interface AlumnosUIProps {
@@ -161,6 +175,24 @@ export default function AlumnosUI({
     currentStatus: ''
   });
   const [selectedMethod, setSelectedMethod] = useState<'EFECTIVO' | 'TRANSFERENCIA' | 'MP' | 'OTRO'>('TRANSFERENCIA');
+
+  // Charge payment installment modal state
+  const [chargePaymentModal, setChargePaymentModal] = useState<{
+    isOpen: boolean;
+    charge: ExtraCharge | null;
+    amountToPay: string;
+    paymentDate: string;
+    method: string;
+    notes: string;
+  }>({
+    isOpen: false,
+    charge: null,
+    amountToPay: '',
+    paymentDate: new Date().toISOString().split('T')[0],
+    method: 'TRANSFERENCIA',
+    notes: ''
+  });
+  const [isSavingPayment, setIsSavingPayment] = useState(false);
 
   const handleDeleteStudent = async (id: number, name: string) => {
     if (!confirm(`¿Estás seguro de que deseas eliminar permanentemente a ${name}? Esta acción no se puede deshacer.`)) {
@@ -324,6 +356,51 @@ export default function AlumnosUI({
       setEcMethod('TRANSFERENCIA');
     } else {
       alert('Error al registrar cargo extra: ' + result.error);
+    }
+  };
+
+  const handleOpenChargePaymentModal = (charge: ExtraCharge) => {
+    const rem = charge.remaining_balance !== undefined ? charge.remaining_balance : charge.amount;
+    setChargePaymentModal({
+      isOpen: true,
+      charge,
+      amountToPay: rem > 0 ? rem.toString() : charge.amount.toString(),
+      paymentDate: new Date().toISOString().split('T')[0],
+      method: 'TRANSFERENCIA',
+      notes: ''
+    });
+  };
+
+  const handleConfirmChargePayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chargePaymentModal.charge) return;
+
+    const amountNum = parseFloat(chargePaymentModal.amountToPay);
+    if (isNaN(amountNum) || amountNum <= 0) {
+      alert('Por favor ingrese un monto válido a abonar mayor a cero.');
+      return;
+    }
+
+    setIsSavingPayment(true);
+    const result = await addExtraChargePayment(chargePaymentModal.charge.id, {
+      amount_paid: amountNum,
+      payment_date: chargePaymentModal.paymentDate,
+      method: chargePaymentModal.method,
+      notes: chargePaymentModal.notes.trim()
+    });
+    setIsSavingPayment(false);
+
+    if (result.success) {
+      setChargePaymentModal({
+        isOpen: false,
+        charge: null,
+        amountToPay: '',
+        paymentDate: new Date().toISOString().split('T')[0],
+        method: 'TRANSFERENCIA',
+        notes: ''
+      });
+    } else {
+      alert('Error al registrar pago de cargo: ' + result.error);
     }
   };
 
@@ -1176,76 +1253,140 @@ export default function AlumnosUI({
                       No tiene cargos especiales asignados.
                     </div>
                   ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '300px', overflowY: 'auto' }}>
-                      {extraChargesByStudent[selected.id].map(charge => (
-                        <div 
-                          key={charge.id}
-                          className="glass" 
-                          style={{ 
-                            padding: '0.75rem', 
-                            border: '1px solid var(--card-border)', 
-                            display: 'flex', 
-                            justifyContent: 'space-between', 
-                            alignItems: 'center',
-                            background: charge.status === 'PAID' ? 'rgba(0, 255, 136, 0.02)' : 'rgba(239, 68, 68, 0.02)'
-                          }}
-                        >
-                          <div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                              <span className="badge badge-secondary" style={{ fontSize: '0.65rem', padding: '0.15rem 0.35rem' }}>{charge.rubro}</span>
-                              <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>{charge.item_name}</span>
-                            </div>
-                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
-                              <span>Vencimiento: {charge.due_date}</span>
-                              {charge.notes && <span>· Notas: {charge.notes}</span>}
-                              {charge.status === 'PAID' && (
-                                <span className="badge" style={{ 
-                                  background: charge.payment_method === 'EFECTIVO' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(96, 165, 250, 0.1)', 
-                                  color: charge.payment_method === 'EFECTIVO' ? 'var(--success)' : '#60a5fa',
-                                  fontSize: '0.65rem',
-                                  padding: '0.1rem 0.3rem',
-                                  border: `1px solid ${charge.payment_method === 'EFECTIVO' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(96, 165, 250, 0.2)'}`,
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '0.15rem'
-                                }}>
-                                  💵 {charge.payment_method || 'TRANSFERENCIA'}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                          
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                            <span style={{ fontWeight: 700, color: charge.status === 'PAID' ? 'var(--success)' : 'var(--danger)', fontSize: '0.9rem' }}>
-                              ${charge.amount.toLocaleString()}
-                            </span>
-                            
-                            <button
-                              type="button"
-                              onClick={() => handleToggleClick(charge.id, charge.status)}
-                              className="btn"
-                              style={{
-                                padding: '0.2rem 0.5rem',
-                                fontSize: '0.7rem',
-                                background: charge.status === 'PAID' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                                color: charge.status === 'PAID' ? 'var(--success)' : 'var(--danger)',
-                                border: `1px solid ${charge.status === 'PAID' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`
-                              }}
-                            >
-                              {charge.status === 'PAID' ? '✓ Cobrado' : '⚡ Marcar Cobrado'}
-                            </button>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '350px', overflowY: 'auto' }}>
+                      {extraChargesByStudent[selected.id].map(charge => {
+                        const totalPaid = charge.total_paid || 0;
+                        const amount = charge.amount || 0;
+                        const remaining = charge.remaining_balance !== undefined ? charge.remaining_balance : Math.max(0, amount - totalPaid);
+                        const isFullyPaid = charge.status === 'PAID' || (totalPaid >= amount && amount > 0);
+                        const isPartial = !isFullyPaid && totalPaid > 0;
+                        const movements = charge.movements || [];
 
-                            <button 
-                              type="button"
-                              onClick={() => handleDeleteExtraCharge(charge.id)}
-                              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.9rem', opacity: 0.6 }}
-                              title="Eliminar cargo"
-                            >
-                              🗑️
-                            </button>
+                        return (
+                          <div 
+                            key={charge.id}
+                            className="glass" 
+                            style={{ 
+                              padding: '0.85rem', 
+                              border: '1px solid var(--card-border)', 
+                              background: isFullyPaid ? 'rgba(0, 255, 136, 0.02)' : isPartial ? 'rgba(245, 158, 11, 0.02)' : 'rgba(239, 68, 68, 0.02)',
+                              borderRadius: 'var(--radius-md)'
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
+                              <div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                  <span className="badge badge-secondary" style={{ fontSize: '0.65rem', padding: '0.15rem 0.35rem' }}>{charge.rubro}</span>
+                                  <span style={{ fontWeight: 700, fontSize: '0.85rem', color: '#fff' }}>{charge.item_name}</span>
+                                  {isFullyPaid ? (
+                                    <span className="badge badge-success" style={{ fontSize: '0.65rem' }}>✅ Pagado</span>
+                                  ) : isPartial ? (
+                                    <span className="badge badge-warning" style={{ fontSize: '0.65rem' }}>⏳ Parcial</span>
+                                  ) : (
+                                    <span className="badge badge-danger" style={{ fontSize: '0.65rem' }}>✗ Impago</span>
+                                  )}
+                                </div>
+                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                                  <span>Vencimiento: {charge.due_date}</span>
+                                  {charge.notes && <span>· {charge.notes}</span>}
+                                </div>
+                              </div>
+                              
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                {!isFullyPaid ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenChargePaymentModal(charge)}
+                                    className="btn btn-primary glass-hover"
+                                    style={{
+                                      padding: '0.25rem 0.6rem',
+                                      fontSize: '0.72rem',
+                                      fontWeight: 700,
+                                      boxShadow: '0 0 10px var(--primary-glow)'
+                                    }}
+                                  >
+                                    ➕ Abonar (${remaining.toLocaleString()})
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleClick(charge.id, 'PAID')}
+                                    className="btn"
+                                    style={{
+                                      padding: '0.2rem 0.5rem',
+                                      fontSize: '0.7rem',
+                                      background: 'rgba(16, 185, 129, 0.1)',
+                                      color: 'var(--success)',
+                                      border: '1px solid rgba(16, 185, 129, 0.3)'
+                                    }}
+                                    title="Click para revertir a impago si fue un error"
+                                  >
+                                    ✓ Cobrado
+                                  </button>
+                                )}
+
+                                <button 
+                                  type="button"
+                                  onClick={() => handleDeleteExtraCharge(charge.id)}
+                                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.9rem', opacity: 0.6 }}
+                                  title="Eliminar cargo"
+                                >
+                                  🗑️
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Financial breakdown */}
+                            <div style={{ 
+                              marginTop: '0.5rem', 
+                              padding: '0.4rem 0.6rem', 
+                              background: 'rgba(0,0,0,0.25)', 
+                              borderRadius: 'var(--radius-sm)',
+                              display: 'grid',
+                              gridTemplateColumns: 'repeat(3, 1fr)',
+                              gap: '0.4rem',
+                              fontSize: '0.75rem'
+                            }}>
+                              <div>
+                                <span style={{ color: 'var(--text-dim)', display: 'block', fontSize: '0.65rem' }}>Total:</span>
+                                <span style={{ fontWeight: 700 }}>${amount.toLocaleString()}</span>
+                              </div>
+                              <div>
+                                <span style={{ color: 'var(--text-dim)', display: 'block', fontSize: '0.65rem' }}>Abonado:</span>
+                                <span style={{ fontWeight: 700, color: totalPaid > 0 ? 'var(--success)' : 'var(--text-muted)' }}>
+                                  ${totalPaid.toLocaleString()} {movements.length > 0 ? `(${movements.length} pago${movements.length > 1 ? 's' : ''})` : ''}
+                                </span>
+                              </div>
+                              <div>
+                                <span style={{ color: 'var(--text-dim)', display: 'block', fontSize: '0.65rem' }}>Saldo Restante:</span>
+                                <span style={{ fontWeight: 800, color: remaining > 0 ? '#f59e0b' : 'var(--success)' }}>
+                                  ${remaining.toLocaleString()}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Payment movements */}
+                            {movements.length > 0 && (
+                              <div style={{ marginTop: '0.4rem', paddingTop: '0.35rem', borderTop: '1px dashed rgba(255,255,255,0.08)' }}>
+                                <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-dim)', marginBottom: '0.2rem' }}>
+                                  📋 Movimientos ({movements.length}):
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                                  {movements.map((m, idx) => (
+                                    <div key={m.id || idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.72rem', padding: '0.15rem 0.35rem', background: 'rgba(255,255,255,0.02)', borderRadius: '3px' }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                        <span>📅 {m.payment_date}</span>
+                                        <span style={{ fontSize: '0.62rem', color: m.method === 'EFECTIVO' ? 'var(--success)' : '#60a5fa' }}>({m.method})</span>
+                                      </div>
+                                      <span style={{ fontWeight: 700, color: 'var(--success)' }}>+${m.amount_paid.toLocaleString()}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -1448,6 +1589,131 @@ export default function AlumnosUI({
                 Confirmar Pago
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {/* CHARGE INSTALLMENT PAYMENT MODAL */}
+      {chargePaymentModal.isOpen && chargePaymentModal.charge && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          animation: 'fadeIn 0.2s ease-out'
+        }}>
+          <div className="glass" style={{ width: '440px', padding: '1.75rem', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 'var(--radius-lg)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: '#fff' }}>💵 Registrar Abono de Concepto</h3>
+              <button 
+                type="button" 
+                onClick={() => setChargePaymentModal(prev => ({ ...prev, isOpen: false, charge: null }))}
+                style={{ background: 'none', border: 'none', color: 'var(--text-dim)', fontSize: '1.2rem', cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--radius-sm)', fontSize: '0.82rem' }}>
+              <p style={{ margin: 0, fontWeight: 700, color: 'var(--primary)' }}>{selected?.name}</p>
+              <p style={{ margin: '0.2rem 0 0 0', color: '#fff' }}>{chargePaymentModal.charge.item_name} ({chargePaymentModal.charge.rubro})</p>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.4rem', color: 'var(--text-dim)', fontSize: '0.75rem' }}>
+                <span>Total Concepto: ${(chargePaymentModal.charge.amount || 0).toLocaleString()}</span>
+                <span style={{ color: '#f59e0b', fontWeight: 700 }}>
+                  Resta: ${(chargePaymentModal.charge.remaining_balance !== undefined ? chargePaymentModal.charge.remaining_balance : chargePaymentModal.charge.amount).toLocaleString()}
+                </span>
+              </div>
+            </div>
+
+            <form onSubmit={handleConfirmChargePayment}>
+              <div style={{ marginBottom: '1rem' }}>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-dim)', display: 'block', marginBottom: '0.35rem', fontWeight: 600 }}>
+                  Monto a Abonar en este Movimiento ($)
+                </label>
+                <input 
+                  type="number"
+                  required
+                  min="1"
+                  step="any"
+                  className="search-input"
+                  style={{ width: '100%', margin: 0, height: '40px', fontSize: '1rem', fontWeight: 700, color: 'var(--success)' }}
+                  value={chargePaymentModal.amountToPay}
+                  onChange={e => setChargePaymentModal(prev => ({ ...prev, amountToPay: e.target.value }))}
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1rem' }}>
+                <div>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-dim)', display: 'block', marginBottom: '0.35rem', fontWeight: 600 }}>
+                    Método de Pago
+                  </label>
+                  <select 
+                    className="filter-select"
+                    style={{ width: '100%', margin: 0, height: '40px' }}
+                    value={chargePaymentModal.method}
+                    onChange={e => setChargePaymentModal(prev => ({ ...prev, method: e.target.value }))}
+                  >
+                    <option value="TRANSFERENCIA">TRANSFERENCIA</option>
+                    <option value="EFECTIVO">EFECTIVO</option>
+                    <option value="MP">MERCADO PAGO</option>
+                    <option value="OTRO">OTRO</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-dim)', display: 'block', marginBottom: '0.35rem', fontWeight: 600 }}>
+                    Fecha de Pago
+                  </label>
+                  <input 
+                    type="date"
+                    required
+                    className="search-input"
+                    style={{ width: '100%', margin: 0, height: '40px', padding: '0.35rem 0.6rem', background: 'rgba(0,0,0,0.2)' }}
+                    value={chargePaymentModal.paymentDate}
+                    onChange={e => setChargePaymentModal(prev => ({ ...prev, paymentDate: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '1.25rem' }}>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-dim)', display: 'block', marginBottom: '0.35rem', fontWeight: 600 }}>
+                  Detalle / Comprobante / Observaciones
+                </label>
+                <input 
+                  type="text"
+                  placeholder="Ej: Pago 1 de 2, transf N° 1823910, etc."
+                  className="search-input"
+                  style={{ width: '100%', margin: 0, height: '40px' }}
+                  value={chargePaymentModal.notes}
+                  onChange={e => setChargePaymentModal(prev => ({ ...prev, notes: e.target.value }))}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <button 
+                  type="button" 
+                  className="btn btn-secondary" 
+                  style={{ flex: 1, height: '40px' }}
+                  onClick={() => setChargePaymentModal(prev => ({ ...prev, isOpen: false, charge: null }))}
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit" 
+                  className="btn btn-primary" 
+                  style={{ flex: 1.2, height: '40px', fontWeight: 700, boxShadow: '0 0 15px var(--primary-glow)' }}
+                  disabled={isSavingPayment}
+                >
+                  {isSavingPayment ? 'Guardando...' : '✓ Confirmar Abono'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

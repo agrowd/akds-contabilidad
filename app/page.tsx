@@ -111,6 +111,19 @@ export default async function DashboardPage() {
   const rubrosFromPayments = await db.all("SELECT DISTINCT UPPER(TRIM(rubro)) as rubro FROM payments WHERE rubro IS NOT NULL AND TRIM(rubro) != ''");
   const rubrosFromExtra = await db.all("SELECT DISTINCT UPPER(TRIM(rubro)) as rubro FROM student_extra_charges WHERE rubro IS NOT NULL AND TRIM(rubro) != ''");
 
+  const cePayments = await db.all(`SELECT receipt, amount_paid FROM payments WHERE receipt LIKE 'CE-%'`);
+  const cePaidByChargeId: Record<number, number> = {};
+  cePayments.forEach((p: any) => {
+    if (p.receipt && p.receipt.startsWith('CE-')) {
+      const cid = parseInt(p.receipt.substring(3), 10);
+      if (!isNaN(cid)) {
+        cePaidByChargeId[cid] = (cePaidByChargeId[cid] || 0) + Number(p.amount_paid || 0);
+      }
+    }
+  });
+
+  const pendingExtraChargesAll = await db.all("SELECT id, rubro, amount, status FROM student_extra_charges WHERE status != 'PAID'");
+
   const allRubrosSet = new Set<string>();
   rubrosFromPayments.forEach((r: any) => { if (r.rubro) allRubrosSet.add(r.rubro); });
   rubrosFromExtra.forEach((r: any) => { if (r.rubro) allRubrosSet.add(r.rubro); });
@@ -121,15 +134,26 @@ export default async function DashboardPage() {
       "SELECT COUNT(*) as count, COALESCE(SUM(amount_paid), 0) as total FROM payments WHERE UPPER(TRIM(rubro)) = UPPER(TRIM(?))",
       [rubroName]
     );
-    const ecStat = await db.get(
-      "SELECT COUNT(*) as count, COALESCE(SUM(amount), 0) as total FROM student_extra_charges WHERE status != 'PAID' AND UPPER(TRIM(rubro)) = UPPER(TRIM(?))",
-      [rubroName]
+
+    const matchingPending = pendingExtraChargesAll.filter((ec: any) => 
+      (ec.rubro || '').toUpperCase().trim() === rubroName.toUpperCase().trim()
     );
+
+    let totalPending = 0;
+    matchingPending.forEach((ec: any) => {
+      const cid = Number(ec.id);
+      const paid = cePaidByChargeId[cid] || 0;
+      const rem = Math.max(0, Number(ec.amount || 0) - paid);
+      totalPending += rem;
+    });
 
     const countPaid = Number(pStat?.count || 0);
     const totalPaid = Number(pStat?.total || 0);
-    const countPending = Number(ecStat?.count || 0);
-    const totalPending = Number(ecStat?.total || 0);
+    const countPending = matchingPending.filter((ec: any) => {
+      const cid = Number(ec.id);
+      const paid = cePaidByChargeId[cid] || 0;
+      return Number(ec.amount || 0) - paid > 0;
+    }).length;
 
     revenueByRubroList.push({
       rubro: rubroName,

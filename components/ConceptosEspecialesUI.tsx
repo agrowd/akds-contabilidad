@@ -4,6 +4,7 @@ import React, { useState, useMemo } from 'react';
 import { 
   addCatalogItem, 
   addExtraCharge, 
+  addExtraChargePayment,
   toggleExtraChargeStatus, 
   deleteExtraCharge 
 } from '@/lib/actions';
@@ -25,6 +26,15 @@ interface CatalogItem {
   price: number;
 }
 
+interface PaymentMovement {
+  id: number;
+  payment_date: string;
+  amount_paid: number;
+  method: string;
+  receipt?: string;
+  info?: string;
+}
+
 interface ExtraCharge {
   id: number;
   student_id: number;
@@ -35,6 +45,10 @@ interface ExtraCharge {
   status: string;
   notes: string;
   payment_method?: string;
+  total_paid?: number;
+  remaining_balance?: number;
+  movements?: PaymentMovement[];
+  movements_count?: number;
 }
 
 interface ConceptosEspecialesUIProps {
@@ -80,21 +94,29 @@ export default function ConceptosEspecialesUI({
   const [newCatalogName, setNewCatalogName] = useState('');
   const [newCatalogPrice, setNewCatalogPrice] = useState('');
 
-  // Payment method prompt modal state
-  const [paymentPrompt, setPaymentPrompt] = useState<{
+  // Payment installment modal state
+  const [paymentModal, setPaymentModal] = useState<{
     isOpen: boolean;
-    chargeId: number | null;
-    currentStatus: string;
+    charge: ExtraCharge | null;
+    studentName: string;
+    amountToPay: string;
+    paymentDate: string;
+    method: string;
+    notes: string;
   }>({
     isOpen: false,
-    chargeId: null,
-    currentStatus: ''
+    charge: null,
+    studentName: '',
+    amountToPay: '',
+    paymentDate: new Date().toISOString().split('T')[0],
+    method: 'TRANSFERENCIA',
+    notes: ''
   });
-  const [selectedMethod, setSelectedMethod] = useState('TRANSFERENCIA');
 
   // Saving states
   const [isSavingExtra, setIsSavingExtra] = useState(false);
   const [isSavingCatalog, setIsSavingCatalog] = useState(false);
+  const [isSavingPayment, setIsSavingPayment] = useState(false);
 
   // Categories list for filters
   const categories = useMemo(() => {
@@ -107,7 +129,7 @@ export default function ConceptosEspecialesUI({
     const counts: Record<number, number> = {};
     students.forEach(s => {
       const list = extraChargesByStudent[s.id] || [];
-      const pending = list.filter(ec => ec.status !== 'PAID').length;
+      const pending = list.filter(ec => (ec.remaining_balance ?? (ec.status === 'PAID' ? 0 : ec.amount)) > 0).length;
       counts[s.id] = pending;
     });
     return counts;
@@ -142,9 +164,9 @@ export default function ConceptosEspecialesUI({
       list = list.filter(s => {
         const charges = extraChargesByStudent[s.id] || [];
         if (statusFilter === 'PENDIENTE') {
-          return charges.some(ec => ec.status !== 'PAID');
+          return charges.some(ec => (ec.remaining_balance ?? (ec.status === 'PAID' ? 0 : ec.amount)) > 0);
         } else if (statusFilter === 'PAID') {
-          return charges.length > 0 && charges.every(ec => ec.status === 'PAID');
+          return charges.length > 0 && charges.every(ec => (ec.remaining_balance ?? 0) === 0);
         } else if (statusFilter === 'CON_CARGOS') {
           return charges.length > 0;
         }
@@ -226,25 +248,56 @@ export default function ConceptosEspecialesUI({
     }
   };
 
-  const handleToggleClick = (chargeId: number, currentStatus: string) => {
-    if (currentStatus === 'UNPAID') {
-      // Open payment method modal before setting PAID
-      setPaymentPrompt({
-        isOpen: true,
-        chargeId,
-        currentStatus
+  const handleOpenPaymentModal = (charge: ExtraCharge) => {
+    const rem = charge.remaining_balance !== undefined ? charge.remaining_balance : charge.amount;
+    setPaymentModal({
+      isOpen: true,
+      charge,
+      studentName: selectedStudent ? selectedStudent.name : 'Alumno',
+      amountToPay: rem > 0 ? rem.toString() : charge.amount.toString(),
+      paymentDate: new Date().toISOString().split('T')[0],
+      method: 'TRANSFERENCIA',
+      notes: ''
+    });
+  };
+
+  const handleConfirmPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!paymentModal.charge) return;
+
+    const amountNum = parseFloat(paymentModal.amountToPay);
+    if (isNaN(amountNum) || amountNum <= 0) {
+      alert('Por favor ingrese un monto a abonar válido mayor a cero.');
+      return;
+    }
+
+    setIsSavingPayment(true);
+    const result = await addExtraChargePayment(paymentModal.charge.id, {
+      amount_paid: amountNum,
+      payment_date: paymentModal.paymentDate,
+      method: paymentModal.method,
+      notes: paymentModal.notes.trim()
+    });
+    setIsSavingPayment(false);
+
+    if (result.success) {
+      setPaymentModal({
+        isOpen: false,
+        charge: null,
+        studentName: '',
+        amountToPay: '',
+        paymentDate: new Date().toISOString().split('T')[0],
+        method: 'TRANSFERENCIA',
+        notes: ''
       });
     } else {
-      // Toggle back to UNPAID immediately
-      handleToggleExtraCharge(chargeId, currentStatus);
+      alert('Error al registrar pago: ' + result.error);
     }
   };
 
   const handleToggleExtraCharge = async (chargeId: number, currentStatus: string, method?: string) => {
     const result = await toggleExtraChargeStatus(chargeId, currentStatus, method);
-    if (result.success) {
-      setPaymentPrompt({ isOpen: false, chargeId: null, currentStatus: '' });
-    } else {
+    if (!result.success) {
       alert('Error al cambiar estado: ' + result.error);
     }
   };
@@ -290,10 +343,10 @@ export default function ConceptosEspecialesUI({
       {/* PAGE HEADER */}
       <div className="page-header">
         <h1 className="page-title title-gradient">Conceptos Especiales</h1>
-        <p className="page-subtitle">Gestión de cargos no mensuales (Fichajes, Micros, Carnets e Indumentaria)</p>
+        <p className="page-subtitle">Gestión de cargos no mensuales, pagos parciales y movimientos (Fichajes, Micros, Carnets e Indumentaria)</p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '1.5rem', alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.3fr', gap: '1.5rem', alignItems: 'start' }}>
         
         {/* PANEL IZQUIERDO: LISTADO DE ALUMNOS */}
         <div className="glass table-wrapper" style={{ padding: '1.25rem' }}>
@@ -393,10 +446,11 @@ export default function ConceptosEspecialesUI({
           </div>
         </div>
 
-        {/* PANEL DERECHO: DETALLES Y GESTIÓN */}
+        {/* PANEL DERECHO: DETALLE DEL ALUMNO Y GESTIÓN DE CARGOS */}
         <div>
           {selectedStudent ? (
-            <div className="glass" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem', animation: 'fadeIn 0.2s ease-out' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              {/* HEADER INFO */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255, 255, 255, 0.1)', paddingBottom: '0.75rem' }}>
                 <div>
                   <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#fff' }}>{selectedStudent.name}</h2>
@@ -514,7 +568,7 @@ export default function ConceptosEspecialesUI({
                       onChange={e => setEcStatus(e.target.value)}
                     >
                       <option value="UNPAID">PENDIENTE</option>
-                      <option value="PAID">PAGADO</option>
+                      <option value="PAID">PAGADO TOTAL</option>
                     </select>
                   </div>
 
@@ -540,7 +594,7 @@ export default function ConceptosEspecialesUI({
                   <label style={{ fontSize: '0.7rem', color: 'var(--text-dim)', display: 'block', marginBottom: '0.25rem', fontWeight: 600 }}>Detalle / Observaciones</label>
                   <input 
                     type="text" 
-                    placeholder="Ej: Talle L, pago en 2 cuotas, etc." 
+                    placeholder="Ej: Talle L, seña de $10.000, etc." 
                     className="search-input" 
                     style={{ width: '100%', margin: 0, height: '38px' }} 
                     value={ecNotes} 
@@ -568,76 +622,154 @@ export default function ConceptosEspecialesUI({
                     Este alumno no tiene conceptos especiales registrados.
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '350px', overflowY: 'auto' }}>
-                    {selectedCharges.map(charge => (
-                      <div 
-                        key={charge.id}
-                        className="glass" 
-                        style={{ 
-                          padding: '0.75rem', 
-                          border: '1px solid var(--card-border)', 
-                          display: 'flex', 
-                          justifyContent: 'space-between', 
-                          alignItems: 'center',
-                          background: charge.status === 'PAID' ? 'rgba(0, 255, 136, 0.02)' : 'rgba(239, 68, 68, 0.02)'
-                        }}
-                      >
-                        <div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            <span className="badge badge-secondary" style={{ fontSize: '0.65rem', padding: '0.15rem 0.35rem' }}>{charge.rubro}</span>
-                            <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>{charge.item_name}</span>
-                          </div>
-                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
-                            <span>Vencimiento: {charge.due_date}</span>
-                            {charge.notes && <span>· Notas: {charge.notes}</span>}
-                            {charge.status === 'PAID' && (
-                              <span className="badge" style={{ 
-                                background: charge.payment_method === 'EFECTIVO' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(96, 165, 250, 0.1)', 
-                                color: charge.payment_method === 'EFECTIVO' ? 'var(--success)' : '#60a5fa',
-                                fontSize: '0.65rem',
-                                padding: '0.1rem 0.3rem',
-                                border: `1px solid ${charge.payment_method === 'EFECTIVO' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(96, 165, 250, 0.2)'}`,
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '0.15rem'
-                              }}>
-                                💵 {charge.payment_method || 'TRANSFERENCIA'}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                          <span style={{ fontWeight: 700, color: charge.status === 'PAID' ? 'var(--success)' : 'var(--danger)', fontSize: '0.9rem' }}>
-                            ${charge.amount.toLocaleString()}
-                          </span>
-                          
-                          <button
-                            type="button"
-                            onClick={() => handleToggleClick(charge.id, charge.status)}
-                            className="btn"
-                            style={{
-                              padding: '0.2rem 0.5rem',
-                              fontSize: '0.7rem',
-                              background: charge.status === 'PAID' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                              color: charge.status === 'PAID' ? 'var(--success)' : 'var(--danger)',
-                              border: `1px solid ${charge.status === 'PAID' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`
-                            }}
-                          >
-                            {charge.status === 'PAID' ? '✓ Pagado' : '✗ Impago'}
-                          </button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '420px', overflowY: 'auto' }}>
+                    {selectedCharges.map(charge => {
+                      const totalPaid = charge.total_paid || 0;
+                      const amount = charge.amount || 0;
+                      const remaining = charge.remaining_balance !== undefined ? charge.remaining_balance : Math.max(0, amount - totalPaid);
+                      const isFullyPaid = charge.status === 'PAID' || (totalPaid >= amount && amount > 0);
+                      const isPartial = !isFullyPaid && totalPaid > 0;
+                      const movements = charge.movements || [];
 
-                          <button 
-                            type="button"
-                            onClick={() => handleDeleteExtraCharge(charge.id)}
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.9rem', opacity: 0.6 }}
-                            title="Eliminar cargo"
-                          >
-                            🗑️
-                          </button>
+                      return (
+                        <div 
+                          key={charge.id}
+                          className="glass" 
+                          style={{ 
+                            padding: '0.85rem', 
+                            border: '1px solid var(--card-border)', 
+                            background: isFullyPaid ? 'rgba(0, 255, 136, 0.02)' : isPartial ? 'rgba(245, 158, 11, 0.02)' : 'rgba(239, 68, 68, 0.02)',
+                            borderRadius: 'var(--radius-md)'
+                          }}
+                        >
+                          {/* TOP BAR OF THE CHARGE */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                <span className="badge badge-secondary" style={{ fontSize: '0.68rem', padding: '0.15rem 0.4rem' }}>{charge.rubro}</span>
+                                <span style={{ fontWeight: 700, fontSize: '0.9rem', color: '#fff' }}>{charge.item_name}</span>
+                                {isFullyPaid ? (
+                                  <span className="badge badge-success" style={{ fontSize: '0.68rem' }}>✅ Pagado Completo</span>
+                                ) : isPartial ? (
+                                  <span className="badge badge-warning" style={{ fontSize: '0.68rem' }}>⏳ Pago Parcial</span>
+                                ) : (
+                                  <span className="badge badge-danger" style={{ fontSize: '0.68rem' }}>✗ Impago</span>
+                                )}
+                              </div>
+
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.3rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                <span>📅 Vence: {charge.due_date}</span>
+                                {charge.notes && <span>· 📝 {charge.notes}</span>}
+                              </div>
+                            </div>
+                            
+                            {/* ACTION BUTTONS */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              {!isFullyPaid ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenPaymentModal(charge)}
+                                  className="btn btn-primary glass-hover"
+                                  style={{
+                                    padding: '0.3rem 0.7rem',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 700,
+                                    boxShadow: '0 0 10px var(--primary-glow)'
+                                  }}
+                                >
+                                  ➕ Abonar Saldo (${remaining.toLocaleString()})
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleExtraCharge(charge.id, 'PAID')}
+                                  className="btn"
+                                  style={{
+                                    padding: '0.25rem 0.6rem',
+                                    fontSize: '0.7rem',
+                                    background: 'rgba(16, 185, 129, 0.1)',
+                                    color: 'var(--success)',
+                                    border: '1px solid rgba(16, 185, 129, 0.3)'
+                                  }}
+                                  title="Click para revertir a impago si fue un error"
+                                >
+                                  ✓ Cobrado
+                                </button>
+                              )}
+
+                              <button 
+                                type="button"
+                                onClick={() => handleDeleteExtraCharge(charge.id)}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.9rem', opacity: 0.6, padding: '0.2rem' }}
+                                title="Eliminar cargo"
+                              >
+                                🗑️
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* FINANCIAL BREAKDOWN */}
+                          <div style={{ 
+                            marginTop: '0.6rem', 
+                            padding: '0.5rem 0.75rem', 
+                            background: 'rgba(0,0,0,0.25)', 
+                            borderRadius: 'var(--radius-sm)',
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(3, 1fr)',
+                            gap: '0.5rem',
+                            fontSize: '0.78rem'
+                          }}>
+                            <div>
+                              <span style={{ color: 'var(--text-dim)', display: 'block', fontSize: '0.68rem' }}>Monto Total:</span>
+                              <span style={{ fontWeight: 700, color: '#fff' }}>${amount.toLocaleString()}</span>
+                            </div>
+                            <div>
+                              <span style={{ color: 'var(--text-dim)', display: 'block', fontSize: '0.68rem' }}>Total Abonado:</span>
+                              <span style={{ fontWeight: 700, color: totalPaid > 0 ? 'var(--success)' : 'var(--text-muted)' }}>
+                                ${totalPaid.toLocaleString()} {movements.length > 0 ? `(${movements.length} pago${movements.length > 1 ? 's' : ''})` : ''}
+                              </span>
+                            </div>
+                            <div>
+                              <span style={{ color: 'var(--text-dim)', display: 'block', fontSize: '0.68rem' }}>Saldo Pendiente:</span>
+                              <span style={{ fontWeight: 800, color: remaining > 0 ? '#f59e0b' : 'var(--success)' }}>
+                                ${remaining.toLocaleString()}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* PAYMENT MOVEMENTS HISTORY (IF ANY) */}
+                          {movements.length > 0 && (
+                            <div style={{ marginTop: '0.5rem', paddingTop: '0.4rem', borderTop: '1px dashed rgba(255,255,255,0.08)' }}>
+                              <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-dim)', marginBottom: '0.3rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                📋 Historial de Movimientos ({movements.length}):
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                {movements.map((m, idx) => (
+                                  <div key={m.id || idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', padding: '0.2rem 0.4rem', background: 'rgba(255,255,255,0.02)', borderRadius: '4px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                      <span>📅 {m.payment_date}</span>
+                                      <span style={{ 
+                                        fontSize: '0.65rem', 
+                                        padding: '0.05rem 0.3rem', 
+                                        borderRadius: '3px',
+                                        background: m.method === 'EFECTIVO' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(96, 165, 250, 0.15)',
+                                        color: m.method === 'EFECTIVO' ? 'var(--success)' : '#60a5fa'
+                                      }}>
+                                        {m.method === 'EFECTIVO' ? '💵 EFECTIVO' : '💳 ' + m.method}
+                                      </span>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                      {m.info && <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{m.info}</span>}
+                                      <span style={{ fontWeight: 700, color: 'var(--success)' }}>+${m.amount_paid.toLocaleString()}</span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -646,14 +778,14 @@ export default function ConceptosEspecialesUI({
             <div className="glass" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', minHeight: '300px' }}>
               <span style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>💎</span>
               <h3 style={{ color: '#fff', fontSize: '1rem', fontWeight: 600, marginBottom: '0.5rem' }}>Selecciona un Alumno</h3>
-              <p style={{ fontSize: '0.85rem', maxWidth: '300px' }}>Selecciona un alumno del panel izquierdo para asignarle conceptos o gestionar sus pagos pendientes.</p>
+              <p style={{ fontSize: '0.85rem', maxWidth: '300px' }}>Selecciona un alumno del panel izquierdo para asignarle conceptos o gestionar sus pagos y movimientos parciales.</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* PAYMENT METHOD SELECTION PROMPT MODAL */}
-      {paymentPrompt.isOpen && (
+      {/* MODAL PARA REGISTRAR PAGO / ABONO DE SALDO */}
+      {paymentModal.isOpen && paymentModal.charge && (
         <div style={{
           position: 'fixed',
           top: 0,
@@ -668,52 +800,117 @@ export default function ConceptosEspecialesUI({
           zIndex: 1000,
           animation: 'fadeIn 0.2s ease-out'
         }}>
-          <div className="glass" style={{ width: '400px', padding: '1.5rem', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 'var(--radius-lg)' }}>
-            <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#fff', marginBottom: '1rem' }}>💵 Seleccionar Método de Pago</h3>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-dim)', marginBottom: '1.25rem' }}>Por favor selecciona el método por el cual el alumno realiza este pago para registrarlo en el flujo de caja.</p>
-            
-            <div style={{ marginBottom: '1.25rem' }}>
-              <label style={{ fontSize: '0.7rem', color: 'var(--text-dim)', display: 'block', marginBottom: '0.4rem', fontWeight: 600 }}>Método de Pago</label>
-              <select 
-                className="filter-select" 
-                style={{ width: '100%', margin: 0, height: '40px' }}
-                value={selectedMethod}
-                onChange={e => setSelectedMethod(e.target.value)}
+          <div className="glass" style={{ width: '440px', padding: '1.75rem', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 'var(--radius-lg)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: '#fff' }}>💵 Registrar Abono de Concepto</h3>
+              <button 
+                type="button" 
+                onClick={() => setPaymentModal(prev => ({ ...prev, isOpen: false, charge: null }))}
+                style={{ background: 'none', border: 'none', color: 'var(--text-dim)', fontSize: '1.2rem', cursor: 'pointer' }}
               >
-                <option value="EFECTIVO">EFECTIVO</option>
-                <option value="TRANSFERENCIA">TRANSFERENCIA</option>
-                <option value="MP">MERCADO PAGO</option>
-                <option value="OTRO">OTRO</option>
-              </select>
+                ✕
+              </button>
             </div>
 
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <button 
-                type="button" 
-                className="btn btn-secondary" 
-                style={{ flex: 1 }}
-                onClick={() => setPaymentPrompt({ isOpen: false, chargeId: null, currentStatus: '' })}
-              >
-                Cancelar
-              </button>
-              <button 
-                type="button" 
-                className="btn btn-primary glass-hover" 
-                style={{ flex: 1, fontWeight: 600, boxShadow: '0 0 10px var(--primary-glow)' }}
-                onClick={() => {
-                  if (paymentPrompt.chargeId) {
-                    handleToggleExtraCharge(paymentPrompt.chargeId, paymentPrompt.currentStatus, selectedMethod);
-                  }
-                }}
-              >
-                Confirmar Pago
-              </button>
+            <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--radius-sm)', fontSize: '0.82rem' }}>
+              <p style={{ margin: 0, fontWeight: 700, color: 'var(--primary)' }}>{paymentModal.studentName}</p>
+              <p style={{ margin: '0.2rem 0 0 0', color: '#fff' }}>{paymentModal.charge.item_name} ({paymentModal.charge.rubro})</p>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.4rem', color: 'var(--text-dim)', fontSize: '0.75rem' }}>
+                <span>Total Concepto: ${(paymentModal.charge.amount || 0).toLocaleString()}</span>
+                <span style={{ color: '#f59e0b', fontWeight: 700 }}>
+                  Resta: ${(paymentModal.charge.remaining_balance !== undefined ? paymentModal.charge.remaining_balance : paymentModal.charge.amount).toLocaleString()}
+                </span>
+              </div>
             </div>
+
+            <form onSubmit={handleConfirmPayment}>
+              <div style={{ marginBottom: '1rem' }}>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-dim)', display: 'block', marginBottom: '0.35rem', fontWeight: 600 }}>
+                  Monto a Abonar en este Movimiento ($)
+                </label>
+                <input 
+                  type="number"
+                  required
+                  min="1"
+                  step="any"
+                  className="search-input"
+                  style={{ width: '100%', margin: 0, height: '40px', fontSize: '1rem', fontWeight: 700, color: 'var(--success)' }}
+                  value={paymentModal.amountToPay}
+                  onChange={e => setPaymentModal(prev => ({ ...prev, amountToPay: e.target.value }))}
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1rem' }}>
+                <div>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-dim)', display: 'block', marginBottom: '0.35rem', fontWeight: 600 }}>
+                    Método de Pago
+                  </label>
+                  <select 
+                    className="filter-select"
+                    style={{ width: '100%', margin: 0, height: '40px' }}
+                    value={paymentModal.method}
+                    onChange={e => setPaymentModal(prev => ({ ...prev, method: e.target.value }))}
+                  >
+                    <option value="TRANSFERENCIA">TRANSFERENCIA</option>
+                    <option value="EFECTIVO">EFECTIVO</option>
+                    <option value="MP">MERCADO PAGO</option>
+                    <option value="OTRO">OTRO</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-dim)', display: 'block', marginBottom: '0.35rem', fontWeight: 600 }}>
+                    Fecha de Pago
+                  </label>
+                  <input 
+                    type="date"
+                    required
+                    className="search-input"
+                    style={{ width: '100%', margin: 0, height: '40px', padding: '0.35rem 0.6rem', background: 'rgba(0,0,0,0.2)' }}
+                    value={paymentModal.paymentDate}
+                    onChange={e => setPaymentModal(prev => ({ ...prev, paymentDate: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '1.25rem' }}>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-dim)', display: 'block', marginBottom: '0.35rem', fontWeight: 600 }}>
+                  Detalle / Comprobante / Observaciones
+                </label>
+                <input 
+                  type="text"
+                  placeholder="Ej: Pago 1 de 2, transf N° 1823910, etc."
+                  className="search-input"
+                  style={{ width: '100%', margin: 0, height: '40px' }}
+                  value={paymentModal.notes}
+                  onChange={e => setPaymentModal(prev => ({ ...prev, notes: e.target.value }))}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <button 
+                  type="button" 
+                  className="btn btn-secondary" 
+                  style={{ flex: 1, height: '40px' }}
+                  onClick={() => setPaymentModal(prev => ({ ...prev, isOpen: false, charge: null }))}
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit" 
+                  className="btn btn-primary" 
+                  style={{ flex: 1.2, height: '40px', fontWeight: 700, boxShadow: '0 0 15px var(--primary-glow)' }}
+                  disabled={isSavingPayment}
+                >
+                  {isSavingPayment ? 'Guardando...' : '✓ Confirmar Abono'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
 
-      {/* GLOBAL CATALOG MANAGER MODAL */}
+      {/* MODAL GLOBAL PARA CREAR PRENDA EN CATÁLOGO */}
       {isAddingCatalogItem && (
         <div style={{
           position: 'fixed',
@@ -729,72 +926,53 @@ export default function ConceptosEspecialesUI({
           zIndex: 1000,
           animation: 'fadeIn 0.2s ease-out'
         }}>
-          <div className="glass" style={{ width: '450px', padding: '1.5rem', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 'var(--radius-lg)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-              <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#fff' }}>🛍️ Catálogo Global de Indumentaria</h3>
-              <button 
-                type="button"
-                onClick={() => setIsAddingCatalogItem(false)}
-                style={{ background: 'none', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: '1.2rem' }}
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Form to add item */}
-            <form onSubmit={handleAddCatalogItem} style={{ marginBottom: '1.25rem', paddingBottom: '1.25rem', borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
-              <h4 style={{ fontSize: '0.8rem', color: 'var(--primary)', fontWeight: 700, marginBottom: '0.5rem', textTransform: 'uppercase' }}>Agregar Nueva Prenda</h4>
-              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
+          <div className="glass" style={{ width: '400px', padding: '1.75rem', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 'var(--radius-lg)' }}>
+            <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: '#fff', marginBottom: '1rem' }}>👕 Nueva Prenda en Catálogo</h3>
+            
+            <form onSubmit={handleAddCatalogItem}>
+              <div style={{ marginBottom: '1rem' }}>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-dim)', display: 'block', marginBottom: '0.4rem', fontWeight: 600 }}>Nombre de la Prenda</label>
                 <input 
                   type="text" 
-                  placeholder="Nombre prenda (Ej: Shorts)" 
+                  placeholder="Ej: Camiseta Oficial 2026" 
                   className="search-input" 
-                  style={{ flex: 2, margin: 0 }} 
-                  value={newCatalogName} 
-                  onChange={e => setNewCatalogName(e.target.value)} 
-                />
-                <input 
-                  type="number" 
-                  placeholder="Precio ($)" 
-                  className="search-input" 
-                  style={{ flex: 1, margin: 0 }} 
-                  value={newCatalogPrice} 
-                  onChange={e => setNewCatalogPrice(e.target.value)} 
+                  style={{ width: '100%', margin: 0, height: '40px' }}
+                  value={newCatalogName}
+                  onChange={e => setNewCatalogName(e.target.value)}
                 />
               </div>
-              <button 
-                type="submit" 
-                className="btn btn-primary glass-hover" 
-                style={{ width: '100%', fontSize: '0.8rem', padding: '0.5rem' }}
-                disabled={isSavingCatalog}
-              >
-                {isSavingCatalog ? 'Guardando...' : '💾 Guardar para todos'}
-              </button>
-            </form>
 
-            {/* List of items */}
-            <h4 style={{ fontSize: '0.8rem', color: 'var(--text-dim)', fontWeight: 700, marginBottom: '0.5rem', textTransform: 'uppercase' }}>Prendas Registradas</h4>
-            <div style={{ maxHeight: '200px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-              {catalogItems.length === 0 ? (
-                <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem', padding: '1rem' }}>No hay prendas en el catálogo.</div>
-              ) : (
-                catalogItems.map(item => (
-                  <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4rem 0.5rem', background: 'rgba(255, 255, 255, 0.02)', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(255, 255, 255, 0.05)', fontSize: '0.85rem' }}>
-                    <span style={{ fontWeight: 500 }}>{item.name}</span>
-                    <span style={{ color: 'var(--primary)', fontWeight: 600 }}>${item.price.toLocaleString()}</span>
-                  </div>
-                ))
-              )}
-            </div>
-            
-            <button 
-              type="button" 
-              className="btn" 
-              style={{ width: '100%', marginTop: '1.25rem', background: 'rgba(255, 255, 255, 0.05)' }} 
-              onClick={() => setIsAddingCatalogItem(false)}
-            >
-              Cerrar
-            </button>
+              <div style={{ marginBottom: '1.25rem' }}>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-dim)', display: 'block', marginBottom: '0.4rem', fontWeight: 600 }}>Precio Oficial ($)</label>
+                <input 
+                  type="number" 
+                  placeholder="Ej: 25000" 
+                  className="search-input" 
+                  style={{ width: '100%', margin: 0, height: '40px' }}
+                  value={newCatalogPrice}
+                  onChange={e => setNewCatalogPrice(e.target.value)}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button 
+                  type="button" 
+                  className="btn btn-secondary" 
+                  style={{ flex: 1 }}
+                  onClick={() => setIsAddingCatalogItem(false)}
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit" 
+                  className="btn btn-primary" 
+                  style={{ flex: 1, fontWeight: 700 }}
+                  disabled={isSavingCatalog}
+                >
+                  {isSavingCatalog ? 'Guardando...' : 'Guardar Prenda'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
