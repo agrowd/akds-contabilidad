@@ -446,11 +446,11 @@ export default function PagosParcialesUI({ students, partialStatuses, paymentsBy
                       </div>
                     )}
 
-                    {/* Progress visual */}
-                    <div style={{ flex: '1 1 200px', minWidth: '180px' }}>
+                    {/* Progress visual and abonos summary */}
+                    <div style={{ flex: '1 1 240px', minWidth: '200px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '0.3rem' }}>
-                        <span style={{ color: 'var(--text-muted)' }}>Progreso: {item.percent_paid}%</span>
-                        <span style={{ color: '#fff', fontWeight: 600 }}>${item.total_paid} / ${expectedValue}</span>
+                        <span style={{ color: 'var(--text-muted)' }}>Progreso: {item.percent_paid}% ({item.history?.length || 0} pago{item.history?.length > 1 ? 's' : ''})</span>
+                        <span style={{ color: '#fff', fontWeight: 600 }}>${item.total_paid.toLocaleString()} / ${expectedValue.toLocaleString()}</span>
                       </div>
                       <div style={{ height: '8px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.03)' }}>
                         <div 
@@ -463,6 +463,16 @@ export default function PagosParcialesUI({ students, partialStatuses, paymentsBy
                           }} 
                         />
                       </div>
+                      {item.history && item.history.length > 0 && (
+                        <div style={{ marginTop: '0.35rem', fontSize: '0.7rem', color: 'var(--text-dim)', display: 'flex', gap: '0.35rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                          <span>Abonos:</span>
+                          {item.history.map((h: any, hIdx: number) => (
+                            <span key={h.id || hIdx} style={{ padding: '0.05rem 0.3rem', background: 'rgba(255,255,255,0.04)', borderRadius: '3px', color: '#fff', border: '1px solid rgba(255,255,255,0.06)' }}>
+                              #{hIdx + 1} {h.payment_date}: <strong style={{ color: 'var(--success)' }}>${(h.amount_paid || 0).toLocaleString()}</strong> ({h.method})
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     {/* Balance / Debe */}

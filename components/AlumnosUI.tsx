@@ -1047,49 +1047,150 @@ export default function AlumnosUI({
                   </div>
                 </div>
 
-                {/* PAYMENT HISTORY */}
-                {selectedPayments.length > 0 && (
-                  <div>
-                    <h4 style={{ fontSize: '0.82rem', fontWeight: 700, marginBottom: '0.6rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      Historial de Pagos ({selectedPayments.length})
-                    </h4>
-                    <div style={{ maxHeight: '250px', overflowY: 'auto' }}>
-                      {selectedPayments.map(p => (
-                        <div
-                          key={p.id}
-                          className="payment-row-hover"
-                          style={{
-                            padding: '0.75rem', borderBottom: '1px solid var(--card-border)',
-                            fontSize: '0.82rem', display: 'flex', flexDirection: 'column', gap: '0.2rem',
-                            position: 'relative'
-                          }}
-                        >
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                            <span style={{ fontWeight: 700 }}>${(p.amount_paid || 0).toLocaleString()}</span>
-                            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                                <span className="text-dim" style={{ fontSize: '0.75rem' }}>{p.payment_date}</span>
-                                <button type="button" onClick={() => handleEditPayment(p)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8rem', opacity: 0.6 }}>✏️</button>
-                                <button type="button" onClick={() => handleDeletePayment(p.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8rem', opacity: 0.6 }}>🗑️</button>
+                {/* PAYMENT HISTORY GROUPED BY MONTH/INSTALLMENT */}
+                {selectedPayments.length > 0 && (() => {
+                  const groups: Record<string, {
+                    key: string;
+                    label: string;
+                    rubro: string;
+                    monthCovered: string;
+                    targetValue: number;
+                    totalPaid: number;
+                    remainingBalance: number;
+                    isComplete: boolean;
+                    payments: Payment[];
+                  }> = {};
+
+                  selectedPayments.forEach(p => {
+                    let key = `single_${p.id}`;
+                    let label = p.rubro || 'PAGO';
+                    let monthCovered = p.month_covered || '';
+                    if (p.receipt && p.receipt.startsWith('CE-')) {
+                      key = `ce_${p.receipt}`;
+                      label = `${p.rubro} (${p.receipt})`;
+                    } else if (p.month_covered) {
+                      const ym = p.month_covered.substring(0, 7);
+                      key = `month_${ym}_${p.rubro || 'CUOTA'}`;
+                      const parts = ym.split('-');
+                      const monthIndex = parseInt(parts[1], 10) - 1;
+                      const monthName = MONTHS[monthIndex] || parts[1];
+                      label = `CUOTA ${monthName} ${parts[0]}`;
+                    }
+
+                    if (!groups[key]) {
+                      groups[key] = {
+                        key,
+                        label,
+                        rubro: p.rubro,
+                        monthCovered,
+                        targetValue: p.month_value || p.amount_paid,
+                        totalPaid: 0,
+                        remainingBalance: 0,
+                        isComplete: false,
+                        payments: []
+                      };
+                    }
+                    groups[key].payments.push(p);
+                    groups[key].totalPaid += p.amount_paid;
+                  });
+
+                  const groupList = Object.values(groups).map(g => {
+                    g.payments.sort((a, b) => (a.payment_date || '').localeCompare(b.payment_date || ''));
+                    const target = g.targetValue > 0 ? g.targetValue : g.totalPaid;
+                    g.targetValue = target;
+                    g.remainingBalance = Math.max(0, target - g.totalPaid);
+                    g.isComplete = g.remainingBalance === 0;
+                    return g;
+                  });
+
+                  groupList.sort((a, b) => {
+                    const dateA = a.payments[a.payments.length - 1]?.payment_date || a.monthCovered || '';
+                    const dateB = b.payments[b.payments.length - 1]?.payment_date || b.monthCovered || '';
+                    return dateB.localeCompare(dateA);
+                  });
+
+                  return (
+                    <div>
+                      <h4 style={{ fontSize: '0.82rem', fontWeight: 700, marginBottom: '0.6rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        Historial de Pagos y Movimientos ({selectedPayments.length} abonos en {groupList.length} cuotas)
+                      </h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', maxHeight: '350px', overflowY: 'auto' }}>
+                        {groupList.map(group => (
+                          <div 
+                            key={group.key}
+                            className="glass"
+                            style={{
+                              padding: '0.75rem',
+                              border: '1px solid var(--card-border)',
+                              borderRadius: 'var(--radius-sm)',
+                              background: group.isComplete ? 'rgba(0, 255, 136, 0.02)' : 'rgba(245, 158, 11, 0.02)'
+                            }}
+                          >
+                            {/* Group Header */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.35rem' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                                <span style={{ fontWeight: 700, fontSize: '0.82rem', color: '#fff' }}>📅 {group.label}</span>
+                                {group.payments.length > 1 && (
+                                  <span style={{ fontSize: '0.65rem', padding: '0.05rem 0.35rem', borderRadius: '3px', background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', fontWeight: 600 }}>
+                                    {group.payments.length} pagos
+                                  </span>
+                                )}
+                                {group.isComplete ? (
+                                  <span className="badge badge-success" style={{ fontSize: '0.6rem' }}>✓ Completada</span>
+                                ) : (
+                                  <span className="badge badge-warning" style={{ fontSize: '0.6rem' }}>⏳ Restan ${group.remainingBalance.toLocaleString()}</span>
+                                )}
+                              </div>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
+                                Total: <strong>${group.totalPaid.toLocaleString()}</strong> de ${group.targetValue.toLocaleString()}
+                              </div>
+                            </div>
+
+                            {/* Movements List */}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                              {group.payments.map((p, pIdx) => (
+                                <div 
+                                  key={p.id}
+                                  style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    fontSize: '0.75rem',
+                                    padding: '0.25rem 0.4rem',
+                                    background: 'rgba(255,255,255,0.02)',
+                                    borderRadius: '3px'
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                    {group.payments.length > 1 && (
+                                      <span style={{ color: 'var(--text-dim)', fontSize: '0.68rem', fontWeight: 600 }}>#{pIdx + 1}</span>
+                                    )}
+                                    <span>📅 {p.payment_date}</span>
+                                    <span style={{ 
+                                      fontSize: '0.65rem', 
+                                      padding: '0.05rem 0.3rem', 
+                                      borderRadius: '3px',
+                                      background: p.method === 'EFECTIVO' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(96, 165, 250, 0.15)',
+                                      color: p.method === 'EFECTIVO' ? 'var(--success)' : '#60a5fa'
+                                    }}>
+                                      {p.method === 'EFECTIVO' ? '💵 EFECTIVO' : '💳 ' + p.method}
+                                    </span>
+                                    {p.info && <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>· {p.info}</span>}
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <strong style={{ color: 'var(--success)' }}>+${(p.amount_paid || 0).toLocaleString()}</strong>
+                                    <button type="button" onClick={() => handleEditPayment(p)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.75rem', opacity: 0.7 }} title="Editar pago">✏️</button>
+                                    <button type="button" onClick={() => handleDeletePayment(p.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.75rem', opacity: 0.7 }} title="Eliminar pago">🗑️</button>
+                                  </div>
+                                </div>
+                              ))}
                             </div>
                           </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span className="text-dim">{p.rubro} · Cuota {p.month_covered ? p.month_covered.substring(0, 7) : '-'}</span>
-                            <div style={{ display: 'flex', gap: '0.4rem' }}>
-                              {p.delay_days !== 0 && (
-                                <span style={{ fontSize: '0.65rem', color: p.delay_days > 0 ? 'var(--warning)' : 'var(--success)' }}>
-                                  {p.delay_days > 0 ? `+${p.delay_days}d` : `${Math.abs(p.delay_days)}d adelanto`}
-                                </span>
-                              )}
-                              <span className={`badge ${p.estado === 'ABONADA' ? 'badge-success' : 'badge-warning'}`} style={{ fontSize: '0.55rem' }}>
-                                {p.estado}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
               </>
             )}
 
