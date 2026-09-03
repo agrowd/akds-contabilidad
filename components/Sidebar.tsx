@@ -7,6 +7,7 @@ import { usePathname } from 'next/navigation';
 const navItems = [
   { href: '/', label: 'Overview', icon: '📊' },
   { href: '/alumnos', label: 'Alumnos', icon: '👥' },
+  { href: '/asistencias', label: 'Asistencias', icon: '📅' },
   { href: '/conceptos-especiales', label: 'Conceptos Especiales', icon: '💎' },
   { href: '/pagos-parciales', label: 'Pagos Parciales', icon: '⏳' },
   { href: '/cobros', label: 'Cobros', icon: '💰' },
