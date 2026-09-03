@@ -10,12 +10,32 @@ interface AsistenciasUIProps {
   students: AttendanceStudentItem[];
 }
 
+interface StudentDayRecord {
+  date: string;      // "2026-06-23"
+  dayMonth: string;  // "23/06"
+  fullDate: string;  // "Mar 23/06/2026"
+  status: 'PRESENT' | 'ABSENT' | 'LATE';
+}
+
+function parseDateShort(isoString: string): { dayMonth: string; fullDate: string; rawDate: string } {
+  const rawDate = isoString.split('T')[0];
+  const [y, m, d] = rawDate.split('-');
+  const dateObj = new Date(Number(y), Number(m) - 1, Number(d));
+  const weekday = dateObj.toLocaleDateString('es-ES', { weekday: 'short' });
+  const weekdayCapitalized = weekday.charAt(0).toUpperCase() + weekday.slice(1);
+  return {
+    dayMonth: `${d}/${m}`,
+    fullDate: `${weekdayCapitalized} ${d}/${m}/${y}`,
+    rawDate,
+  };
+}
+
 export default function AsistenciasUI({
   initialRecords,
   teachers,
   students,
 }: AsistenciasUIProps) {
-  const [activeTab, setActiveTab] = useState<'historial' | 'alumnos' | 'profesores'>('historial');
+  const [activeTab, setActiveTab] = useState<'matriz' | 'alumnos' | 'historial' | 'profesores'>('matriz');
   const [search, setSearch] = useState('');
   const [teacherFilter, setTeacherFilter] = useState('ALL');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
@@ -24,6 +44,7 @@ export default function AsistenciasUI({
   const [dateFilter, setDateFilter] = useState('ALL');
   const [customDate, setCustomDate] = useState('');
   const [studentSort, setStudentSort] = useState<'name' | 'most_absent' | 'lowest_rate' | 'highest_rate'>('most_absent');
+  const [studentDayFilter, setStudentDayFilter] = useState<'ALL' | 'ABSENT_ONLY' | 'PRESENT_ONLY'>('ALL');
 
   // Distinct filter options
   const categories = useMemo(() => {
@@ -44,6 +65,48 @@ export default function AsistenciasUI({
     return Array.from(set).sort();
   }, [initialRecords, students]);
 
+  // All unique dates sorted chronologically
+  const uniqueDatesList = useMemo(() => {
+    const map = new Map<string, { rawDate: string; dayMonth: string; fullDate: string }>();
+    initialRecords.forEach((r) => {
+      const raw = r.date.split('T')[0];
+      if (!map.has(raw)) {
+        map.set(raw, parseDateShort(r.date));
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.rawDate.localeCompare(b.rawDate));
+  }, [initialRecords]);
+
+  // Map of student attendance by date
+  const studentAttendanceMap = useMemo(() => {
+    const dateMap = new Map<string, Map<string, 'PRESENT' | 'ABSENT' | 'LATE'>>();
+    const listMap = new Map<string, StudentDayRecord[]>();
+
+    initialRecords.forEach((r) => {
+      const raw = r.date.split('T')[0];
+      if (!dateMap.has(r.student_id)) {
+        dateMap.set(r.student_id, new Map());
+        listMap.set(r.student_id, []);
+      }
+      dateMap.get(r.student_id)!.set(raw, r.status);
+
+      const parsed = parseDateShort(r.date);
+      listMap.get(r.student_id)!.push({
+        date: raw,
+        dayMonth: parsed.dayMonth,
+        fullDate: parsed.fullDate,
+        status: r.status,
+      });
+    });
+
+    // Sort lists chronologically
+    listMap.forEach((list) => {
+      list.sort((a, b) => a.date.localeCompare(b.date));
+    });
+
+    return { dateMap, listMap };
+  }, [initialRecords]);
+
   // General KPIs across all records
   const globalStats = useMemo(() => {
     const total = initialRecords.length;
@@ -51,9 +114,7 @@ export default function AsistenciasUI({
     const late = initialRecords.filter((r) => r.status === 'LATE').length;
     const absent = initialRecords.filter((r) => r.status === 'ABSENT').length;
     const rate = total > 0 ? Math.round((present / total) * 100) : 0;
-    
-    // Unique dates
-    const uniqueDates = new Set(initialRecords.map((r) => r.date.split('T')[0])).size;
+    const uniqueDates = uniqueDatesList.length;
 
     return {
       total,
@@ -64,9 +125,9 @@ export default function AsistenciasUI({
       uniqueDates,
       studentsCount: students.length,
     };
-  }, [initialRecords, students]);
+  }, [initialRecords, students, uniqueDatesList]);
 
-  // Filtered attendance history
+  // Filtered attendance history for tabular log
   const filteredRecords = useMemo(() => {
     const now = new Date();
     const todayStr = now.toISOString().split('T')[0];
@@ -114,7 +175,7 @@ export default function AsistenciasUI({
     });
   }, [initialRecords, search, teacherFilter, categoryFilter, turnoFilter, statusFilter, dateFilter, customDate]);
 
-  // Aggregated stats per student
+  // Aggregated stats per student with individual day history
   const studentSummaries = useMemo(() => {
     const map = new Map<string, {
       id: string;
@@ -127,57 +188,36 @@ export default function AsistenciasUI({
       late: number;
       absent: number;
       rate: number;
+      history: StudentDayRecord[];
     }>();
 
     // Initialize map with all students
     students.forEach((s) => {
+      const hist = studentAttendanceMap.listMap.get(s.id) || [];
+      const present = hist.filter((h) => h.status === 'PRESENT').length;
+      const late = hist.filter((h) => h.status === 'LATE').length;
+      const absent = hist.filter((h) => h.status === 'ABSENT').length;
+      const total = hist.length;
+      const rate = total > 0 ? Math.round((present / total) * 100) : 0;
+
       map.set(s.id, {
         id: s.id,
         name: s.name,
         category: s.category,
         turno: s.turno,
         teacher_name: s.teacher_name,
-        total: 0,
-        present: 0,
-        late: 0,
-        absent: 0,
-        rate: 0,
+        total,
+        present,
+        late,
+        absent,
+        rate,
+        history: hist,
       });
     });
 
-    // Populate with attendance records
-    initialRecords.forEach((r) => {
-      let entry = map.get(r.student_id);
-      if (!entry) {
-        entry = {
-          id: r.student_id,
-          name: r.student_name,
-          category: r.category,
-          turno: r.turno,
-          teacher_name: r.teacher_name,
-          total: 0,
-          present: 0,
-          late: 0,
-          absent: 0,
-          rate: 0,
-        };
-        map.set(r.student_id, entry);
-      }
-
-      entry.total += 1;
-      if (r.status === 'PRESENT') entry.present += 1;
-      else if (r.status === 'LATE') entry.late += 1;
-      else if (r.status === 'ABSENT') entry.absent += 1;
-    });
-
-    // Calculate rates
-    const list = Array.from(map.values()).map((entry) => {
-      const rate = entry.total > 0 ? Math.round((entry.present / entry.total) * 100) : 0;
-      return { ...entry, rate };
-    });
+    let filtered = Array.from(map.values());
 
     // Apply search filter
-    let filtered = list;
     if (search.trim()) {
       const term = search.toLowerCase();
       filtered = filtered.filter((s) =>
@@ -207,7 +247,7 @@ export default function AsistenciasUI({
     });
 
     return filtered;
-  }, [students, initialRecords, search, categoryFilter, teacherFilter, turnoFilter, studentSort]);
+  }, [students, studentAttendanceMap, search, categoryFilter, teacherFilter, turnoFilter, studentSort]);
 
   // Aggregated metrics per teacher
   const teacherMetrics = useMemo(() => {
@@ -220,7 +260,6 @@ export default function AsistenciasUI({
       const totalRecords = teacherRecords.length;
       const rate = totalRecords > 0 ? Math.round((presentCount / totalRecords) * 100) : 0;
 
-      // Group by categories and turnos
       const groupsMap = new Map<string, number>();
       teacherStudents.forEach((s) => {
         const key = `Cat. ${s.category} — ${s.turno}`;
@@ -242,16 +281,32 @@ export default function AsistenciasUI({
 
   // Format date helper
   const formatDateLabel = (iso: string) => {
-    const datePart = iso.split('T')[0];
-    const [y, m, d] = datePart.split('-');
-    const dateObj = new Date(Number(y), Number(m) - 1, Number(d));
-    const weekday = dateObj.toLocaleDateString('es-ES', { weekday: 'short' });
-    return `${weekday.charAt(0).toUpperCase() + weekday.slice(1)}, ${d}/${m}/${y}`;
+    const parsed = parseDateShort(iso);
+    return parsed.fullDate;
   };
 
   // Export to Excel
   const handleExportExcel = () => {
-    if (activeTab === 'historial') {
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    if (activeTab === 'matriz') {
+      const exportData = studentSummaries.map((s) => {
+        const row: Record<string, any> = {
+          Alumno: s.name,
+          Categoría: s.category,
+          Turno: s.turno,
+          Profesor: s.teacher_name,
+        };
+        uniqueDatesList.forEach((d) => {
+          const st = studentAttendanceMap.dateMap.get(s.id)?.get(d.rawDate);
+          row[d.dayMonth] = st === 'PRESENT' ? 'Presente' : st === 'LATE' ? 'Tarde' : st === 'ABSENT' ? 'Ausente' : '-';
+        });
+        row['Faltas'] = s.absent;
+        row['% Asistencia'] = `${s.rate}%`;
+        return row;
+      });
+      exportToExcel(exportData, `Matriz_Asistencias_AKDs_${todayStr}`, 'Matriz');
+    } else if (activeTab === 'historial') {
       const exportData = filteredRecords.map((r) => ({
         Fecha: r.date.split('T')[0],
         Alumno: r.student_name,
@@ -260,7 +315,7 @@ export default function AsistenciasUI({
         Profesor: r.teacher_name,
         Estado: r.status === 'PRESENT' ? 'Presente' : r.status === 'LATE' ? 'Tarde' : 'Ausente',
       }));
-      exportToExcel(exportData, `Asistencias_AKDs_${new Date().toISOString().split('T')[0]}`, 'Asistencias');
+      exportToExcel(exportData, `Asistencias_AKDs_${todayStr}`, 'Asistencias');
     } else if (activeTab === 'alumnos') {
       const exportData = studentSummaries.map((s) => ({
         Alumno: s.name,
@@ -272,8 +327,10 @@ export default function AsistenciasUI({
         Tardes: s.late,
         'Faltas (Ausente)': s.absent,
         '% Asistencia': `${s.rate}%`,
+        'Días Ausente': s.history.filter((h) => h.status === 'ABSENT').map((h) => h.dayMonth).join(', ') || 'Ninguna',
+        'Días Presente': s.history.filter((h) => h.status === 'PRESENT').map((h) => h.dayMonth).join(', ') || 'Ninguna',
       }));
-      exportToExcel(exportData, `Resumen_Alumnos_Asistencias_${new Date().toISOString().split('T')[0]}`, 'Alumnos');
+      exportToExcel(exportData, `Resumen_Alumnos_Asistencias_${todayStr}`, 'Alumnos');
     } else {
       const exportData = teacherMetrics.map((t) => ({
         Profesor: t.name,
@@ -284,13 +341,41 @@ export default function AsistenciasUI({
         Ausentes: t.absentCount,
         '% Presentismo': `${t.rate}%`,
       }));
-      exportToExcel(exportData, `Resumen_Profesores_${new Date().toISOString().split('T')[0]}`, 'Profesores');
+      exportToExcel(exportData, `Resumen_Profesores_${todayStr}`, 'Profesores');
     }
   };
 
   // Export to PDF
   const handleExportPDF = () => {
-    if (activeTab === 'historial') {
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    if (activeTab === 'matriz' || activeTab === 'alumnos') {
+      const exportData = studentSummaries.map((s) => ({
+        alumno: s.name,
+        categoria: String(s.category),
+        profesor: s.teacher_name,
+        clases: String(s.total),
+        presentes: String(s.present),
+        faltas: String(s.absent),
+        rate: `${s.rate}%`,
+        dias_ausente: s.history.filter((h) => h.status === 'ABSENT').map((h) => h.dayMonth).join(', ') || 'Sin faltas',
+      }));
+      exportToPDF(
+        exportData,
+        `Resumen_Alumnos_Asistencias_${todayStr}`,
+        'AKDs — Asistencias y Faltas por Alumno',
+        [
+          { header: 'Alumno', dataKey: 'alumno' },
+          { header: 'Cat.', dataKey: 'categoria' },
+          { header: 'Profesor', dataKey: 'profesor' },
+          { header: 'Clases', dataKey: 'clases' },
+          { header: 'Pres.', dataKey: 'presentes' },
+          { header: 'Faltas', dataKey: 'faltas' },
+          { header: '% Asist.', dataKey: 'rate' },
+          { header: 'Días con Falta (Ausente)', dataKey: 'dias_ausente' },
+        ]
+      );
+    } else {
       const exportData = filteredRecords.map((r) => ({
         fecha: r.date.split('T')[0],
         alumno: r.student_name,
@@ -301,7 +386,7 @@ export default function AsistenciasUI({
       }));
       exportToPDF(
         exportData,
-        `Asistencias_AKDs_${new Date().toISOString().split('T')[0]}`,
+        `Asistencias_AKDs_${todayStr}`,
         'AKDs — Historial de Asistencias',
         [
           { header: 'Fecha', dataKey: 'fecha' },
@@ -310,32 +395,6 @@ export default function AsistenciasUI({
           { header: 'Turno', dataKey: 'turno' },
           { header: 'Profesor', dataKey: 'profesor' },
           { header: 'Estado', dataKey: 'estado' },
-        ]
-      );
-    } else {
-      const exportData = studentSummaries.map((s) => ({
-        alumno: s.name,
-        categoria: String(s.category),
-        turno: s.turno,
-        profesor: s.teacher_name,
-        total: String(s.total),
-        present: String(s.present),
-        absent: String(s.absent),
-        rate: `${s.rate}%`,
-      }));
-      exportToPDF(
-        exportData,
-        `Resumen_Alumnos_${new Date().toISOString().split('T')[0]}`,
-        'AKDs — Resumen de Asistencia por Alumno',
-        [
-          { header: 'Alumno', dataKey: 'alumno' },
-          { header: 'Cat.', dataKey: 'categoria' },
-          { header: 'Turno', dataKey: 'turno' },
-          { header: 'Profesor', dataKey: 'profesor' },
-          { header: 'Clases', dataKey: 'total' },
-          { header: 'Presentes', dataKey: 'present' },
-          { header: 'Faltas', dataKey: 'absent' },
-          { header: '% Asistencia', dataKey: 'rate' },
         ]
       );
     }
@@ -348,7 +407,7 @@ export default function AsistenciasUI({
         <div>
           <h1 className="page-title">📅 Control de Asistencias</h1>
           <p className="page-subtitle">
-            Trazabilidad en tiempo real de asistencias, presentismo y faltas sincronizadas con los profesores de la academia.
+            Indicador visual de asistencias: visualiza en <strong>verde cuando asistió</strong> y en <strong>rojo el día que estuvo ausente</strong> con diseño de matriz.
           </p>
         </div>
         <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
@@ -417,14 +476,14 @@ export default function AsistenciasUI({
       </div>
 
       {/* Navigation Tabs */}
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', borderBottom: '1px solid var(--card-border)', paddingBottom: '0.75rem' }}>
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', borderBottom: '1px solid var(--card-border)', paddingBottom: '0.75rem', flexWrap: 'wrap' }}>
         <button
           type="button"
-          onClick={() => setActiveTab('historial')}
-          className={`btn ${activeTab === 'historial' ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => setActiveTab('matriz')}
+          className={`btn ${activeTab === 'matriz' ? 'btn-primary' : 'btn-secondary'}`}
           style={{ fontSize: '0.85rem' }}
         >
-          📋 Historial de Registros ({filteredRecords.length})
+          📊 Matriz General por Fecha ({uniqueDatesList.length} días)
         </button>
         <button
           type="button"
@@ -432,7 +491,15 @@ export default function AsistenciasUI({
           className={`btn ${activeTab === 'alumnos' ? 'btn-primary' : 'btn-secondary'}`}
           style={{ fontSize: '0.85rem' }}
         >
-          👥 Resumen por Alumno ({studentSummaries.length})
+          👥 Resumen por Alumno con Días ({studentSummaries.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('historial')}
+          className={`btn ${activeTab === 'historial' ? 'btn-primary' : 'btn-secondary'}`}
+          style={{ fontSize: '0.85rem' }}
+        >
+          📋 Historial Detallado ({filteredRecords.length})
         </button>
         <button
           type="button"
@@ -510,6 +577,23 @@ export default function AsistenciasUI({
             </select>
           </div>
 
+          {/* Sort Filter (Active in matriz / alumnos) */}
+          {(activeTab === 'alumnos' || activeTab === 'matriz') && (
+            <div>
+              <select
+                value={studentSort}
+                onChange={(e) => setStudentSort(e.target.value as any)}
+                className="filter-select"
+                style={{ width: '100%' }}
+              >
+                <option value="most_absent">⚠️ Más Faltas Primero</option>
+                <option value="lowest_rate">📉 Menor Asistencia %</option>
+                <option value="highest_rate">📈 Mayor Asistencia %</option>
+                <option value="name">🔤 Nombre Alumno (A-Z)</option>
+              </select>
+            </div>
+          )}
+
           {/* Status Filter (Active in historial) */}
           {activeTab === 'historial' && (
             <div>
@@ -551,27 +635,373 @@ export default function AsistenciasUI({
               )}
             </div>
           )}
-
-          {/* Sort Filter (Active in alumnos) */}
-          {activeTab === 'alumnos' && (
-            <div>
-              <select
-                value={studentSort}
-                onChange={(e) => setStudentSort(e.target.value as any)}
-                className="filter-select"
-                style={{ width: '100%' }}
-              >
-                <option value="most_absent">⚠️ Más Faltas Primero</option>
-                <option value="lowest_rate">📉 Menor Asistencia %</option>
-                <option value="highest_rate">📈 Mayor Asistencia %</option>
-                <option value="name">🔤 Nombre Alumno (A-Z)</option>
-              </select>
-            </div>
-          )}
         </div>
       </div>
 
-      {/* TAB CONTENT 1: HISTORIAL DE REGISTROS */}
+      {/* TAB CONTENT 1: MATRIZ GENERAL POR FECHA (DISEÑO MATRIZ DE PAGOS) */}
+      {activeTab === 'matriz' && (
+        <div className="card" style={{ padding: '1.25rem', marginBottom: '2rem' }}>
+          {/* Legend Banner */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem', borderBottom: '1px solid var(--card-border)', paddingBottom: '0.75rem' }}>
+            <div>
+              <h3 style={{ fontSize: '1rem', color: '#fff', margin: 0 }}>
+                🗓️ Matriz de Asistencias por Fecha
+              </h3>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                Cada celda representa un día de clase: verde para presentes y rojo para ausencias.
+              </p>
+            </div>
+            {/* Visual Indicators Legend */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                <div className="matrix-cell status-paid" style={{ width: '32px', height: '24px', fontSize: '0.7rem' }}>✓</div>
+                <span style={{ fontSize: '0.75rem', color: 'var(--success)' }}>Presente</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                <div className="matrix-cell status-danger" style={{ width: '32px', height: '24px', fontSize: '0.7rem' }}>✗</div>
+                <span style={{ fontSize: '0.75rem', color: 'var(--danger)' }}>Ausente (Falta)</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                <div className="matrix-cell status-partial" style={{ width: '32px', height: '24px', fontSize: '0.7rem' }}>⏱</div>
+                <span style={{ fontSize: '0.75rem', color: 'var(--warning)' }}>Tarde</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                <div className="matrix-cell status-exempt" style={{ width: '32px', height: '24px', fontSize: '0.7rem' }}>-</div>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Sin clase</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Matrix Table with Sticky Column */}
+          {studentSummaries.length === 0 ? (
+            <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+              <p style={{ fontSize: '1.2rem', marginBottom: '0.5rem' }}>No hay alumnos que coincidan con la búsqueda.</p>
+            </div>
+          ) : (
+            <div className="table-container" style={{ overflowX: 'auto', maxHeight: '70vh' }}>
+              <table className="data-table" style={{ whiteSpace: 'nowrap' }}>
+                <thead>
+                  <tr>
+                    <th className="sticky-col" style={{ position: 'sticky', left: 0, zIndex: 10, background: 'var(--bg-elevated)', minWidth: '220px' }}>
+                      Alumno
+                    </th>
+                    <th style={{ width: '90px' }}>Cat.</th>
+                    <th style={{ minWidth: '110px' }}>Profesor</th>
+                    {uniqueDatesList.map((d) => (
+                      <th key={d.rawDate} style={{ textAlign: 'center', minWidth: '55px', padding: '0.4rem 0.2rem' }}>
+                        <span style={{ fontSize: '0.75rem', fontWeight: 700, display: 'block' }}>{d.dayMonth}</span>
+                        <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontWeight: 400 }}>{d.fullDate.split(' ')[0]}</span>
+                      </th>
+                    ))}
+                    <th style={{ width: '80px', textAlign: 'center' }}>Faltas</th>
+                    <th style={{ width: '100px', textAlign: 'center' }}>% Asist.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {studentSummaries.map((s) => {
+                    const rateColor =
+                      s.rate >= 75 ? 'var(--success)' : s.rate >= 50 ? 'var(--warning)' : 'var(--danger)';
+
+                    return (
+                      <tr key={s.id}>
+                        {/* Sticky Student Name */}
+                        <td className="sticky-col" style={{ position: 'sticky', left: 0, zIndex: 5, background: 'var(--bg-surface)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                            <strong style={{ color: '#fff', fontSize: '0.88rem' }}>{s.name}</strong>
+                            {s.absent >= 3 && (
+                              <span className="badge badge-danger" title="Alumno con 3 o más faltas">
+                                ⚠️ {s.absent}
+                              </span>
+                            )}
+                          </div>
+                          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block' }}>{s.turno}</span>
+                        </td>
+                        <td>
+                          <span className="badge badge-secondary">Cat. {s.category}</span>
+                        </td>
+                        <td>
+                          <span style={{ fontSize: '0.8rem', color: 'var(--secondary)' }}>Prof. {s.teacher_name}</span>
+                        </td>
+
+                        {/* Date Matrix Columns */}
+                        {uniqueDatesList.map((d) => {
+                          const status = studentAttendanceMap.dateMap.get(s.id)?.get(d.rawDate);
+
+                          if (status === 'PRESENT') {
+                            return (
+                              <td key={d.rawDate} style={{ padding: '0.3rem', textAlign: 'center' }}>
+                                <div
+                                  className="matrix-cell status-paid"
+                                  title={`Presente: ${s.name} el ${d.fullDate}`}
+                                  style={{ width: '100%', height: '28px', fontSize: '0.75rem', fontWeight: 700, margin: '0 auto' }}
+                                >
+                                  ✓
+                                </div>
+                              </td>
+                            );
+                          }
+
+                          if (status === 'ABSENT') {
+                            return (
+                              <td key={d.rawDate} style={{ padding: '0.3rem', textAlign: 'center' }}>
+                                <div
+                                  className="matrix-cell status-danger"
+                                  title={`Ausente (FALTA): ${s.name} el ${d.fullDate}`}
+                                  style={{ width: '100%', height: '28px', fontSize: '0.75rem', fontWeight: 700, margin: '0 auto' }}
+                                >
+                                  ✗
+                                </div>
+                              </td>
+                            );
+                          }
+
+                          if (status === 'LATE') {
+                            return (
+                              <td key={d.rawDate} style={{ padding: '0.3rem', textAlign: 'center' }}>
+                                <div
+                                  className="matrix-cell status-partial"
+                                  title={`Tarde: ${s.name} el ${d.fullDate}`}
+                                  style={{ width: '100%', height: '28px', fontSize: '0.75rem', fontWeight: 700, margin: '0 auto' }}
+                                >
+                                  ⏱
+                                </div>
+                              </td>
+                            );
+                          }
+
+                          return (
+                            <td key={d.rawDate} style={{ padding: '0.3rem', textAlign: 'center' }}>
+                              <div
+                                className="matrix-cell status-exempt"
+                                title={`Sin registro / Sin clase`}
+                                style={{ width: '100%', height: '28px', fontSize: '0.7rem', color: 'var(--text-muted)', margin: '0 auto' }}
+                              >
+                                -
+                              </div>
+                            </td>
+                          );
+                        })}
+
+                        {/* Total Absences */}
+                        <td style={{ textAlign: 'center', fontWeight: 700, color: s.absent > 0 ? 'var(--danger)' : 'var(--text-dim)' }}>
+                          {s.absent}
+                        </td>
+
+                        {/* Attendance Rate */}
+                        <td style={{ textAlign: 'center' }}>
+                          <span style={{ fontWeight: 700, color: rateColor, fontSize: '0.85rem' }}>
+                            {s.total > 0 ? `${s.rate}%` : '-'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB CONTENT 2: RESUMEN POR ALUMNO CON DÍAS Y FALTAS VISUALES */}
+      {activeTab === 'alumnos' && (
+        <div className="card" style={{ padding: '1.25rem', marginBottom: '2rem' }}>
+          {/* Sub-filter bar for Day Badges */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+            <div>
+              <h3 style={{ fontSize: '1rem', color: '#fff', margin: 0 }}>
+                👥 Días de Asistencia y Faltas por Alumno
+              </h3>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                En <strong style={{ color: 'var(--danger)' }}>rojo se indican los días que estuvo ausente</strong> y en <strong style={{ color: 'var(--success)' }}>verde los días que asistió</strong>.
+              </p>
+            </div>
+            {/* Quick toggle filters */}
+            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => setStudentDayFilter('ALL')}
+                className={`btn ${studentDayFilter === 'ALL' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ fontSize: '0.78rem', padding: '0.3rem 0.6rem' }}
+              >
+                👁️ Todos los días
+              </button>
+              <button
+                type="button"
+                onClick={() => setStudentDayFilter('ABSENT_ONLY')}
+                className={`btn ${studentDayFilter === 'ABSENT_ONLY' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{
+                  fontSize: '0.78rem',
+                  padding: '0.3rem 0.6rem',
+                  borderColor: 'rgba(239, 68, 68, 0.4)',
+                  color: studentDayFilter === 'ABSENT_ONLY' ? '#fff' : 'var(--danger)',
+                }}
+              >
+                🔴 Solo Faltas (Rojo)
+              </button>
+              <button
+                type="button"
+                onClick={() => setStudentDayFilter('PRESENT_ONLY')}
+                className={`btn ${studentDayFilter === 'PRESENT_ONLY' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{
+                  fontSize: '0.78rem',
+                  padding: '0.3rem 0.6rem',
+                  borderColor: 'rgba(16, 185, 129, 0.4)',
+                  color: studentDayFilter === 'PRESENT_ONLY' ? '#fff' : 'var(--success)',
+                }}
+              >
+                🟢 Solo Presentes (Verde)
+              </button>
+            </div>
+          </div>
+
+          {studentSummaries.length === 0 ? (
+            <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+              <p style={{ fontSize: '1.2rem', marginBottom: '0.5rem' }}>No hay alumnos que coincidan con la búsqueda.</p>
+            </div>
+          ) : (
+            <div className="table-container">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th style={{ minWidth: '240px' }}>Alumno y Días de Asistencia</th>
+                    <th style={{ width: '100px' }}>Categoría</th>
+                    <th style={{ width: '130px' }}>Profesor</th>
+                    <th style={{ width: '80px', textAlign: 'center' }}>Clases</th>
+                    <th style={{ width: '80px', textAlign: 'center' }}>Pres.</th>
+                    <th style={{ width: '80px', textAlign: 'center' }}>Faltas</th>
+                    <th style={{ width: '150px' }}>% Asistencia</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {studentSummaries.map((s) => {
+                    const rateColor =
+                      s.rate >= 75 ? 'var(--success)' : s.rate >= 50 ? 'var(--warning)' : 'var(--danger)';
+
+                    const displayedDays = s.history.filter((h) => {
+                      if (studentDayFilter === 'ABSENT_ONLY') return h.status === 'ABSENT';
+                      if (studentDayFilter === 'PRESENT_ONLY') return h.status === 'PRESENT';
+                      return true;
+                    });
+
+                    return (
+                      <tr key={s.id}>
+                        {/* Student Name + Visual Date Cells */}
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
+                            <strong style={{ color: '#fff', fontSize: '0.92rem' }}>{s.name}</strong>
+                            {s.absent >= 3 && (
+                              <span className="badge badge-danger" title="Alumno con 3 o más faltas registradas">
+                                ⚠️ {s.absent} Faltas
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Inline Visual Indicator: Days in Green / Red */}
+                          {s.history.length === 0 ? (
+                            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                              Sin asistencias registradas aún
+                            </span>
+                          ) : displayedDays.length === 0 ? (
+                            <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
+                              {studentDayFilter === 'ABSENT_ONLY' ? '✨ Sin faltas registradas' : 'Sin registros'}
+                            </span>
+                          ) : (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center', marginTop: '0.25rem' }}>
+                              {displayedDays.map((d) => {
+                                const isPresent = d.status === 'PRESENT';
+                                const isAbsent = d.status === 'ABSENT';
+                                const cls = isPresent ? 'status-paid' : isAbsent ? 'status-danger' : 'status-partial';
+                                const icon = isPresent ? '✓' : isAbsent ? '✗' : '⏱';
+
+                                return (
+                                  <div
+                                    key={d.date}
+                                    className={`matrix-cell ${cls}`}
+                                    title={`${isPresent ? 'Presente' : isAbsent ? 'Ausente (FALTA)' : 'Tarde'}: ${d.fullDate}`}
+                                    style={{
+                                      minWidth: '58px',
+                                      height: '25px',
+                                      padding: '0 0.4rem',
+                                      fontSize: '0.64rem',
+                                      fontWeight: 700,
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      gap: '3px',
+                                      borderRadius: '6px',
+                                      userSelect: 'none',
+                                    }}
+                                  >
+                                    <span>{icon}</span>
+                                    <span>{d.dayMonth}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Category & Shift */}
+                        <td>
+                          <span className="badge badge-secondary">Cat. {s.category}</span>
+                          <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)', display: 'block', marginTop: '0.2rem' }}>
+                            {s.turno}
+                          </span>
+                        </td>
+
+                        {/* Teacher */}
+                        <td>
+                          <span style={{ color: 'var(--secondary)', fontSize: '0.85rem' }}>Prof. {s.teacher_name}</span>
+                        </td>
+
+                        {/* Counts */}
+                        <td style={{ textAlign: 'center', fontWeight: 600 }}>{s.total}</td>
+                        <td style={{ textAlign: 'center', color: 'var(--success)', fontWeight: 600 }}>
+                          {s.present}
+                        </td>
+                        <td style={{ textAlign: 'center', color: s.absent > 0 ? 'var(--danger)' : 'var(--text-dim)', fontWeight: 700 }}>
+                          {s.absent}
+                        </td>
+
+                        {/* Progress Bar */}
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <div
+                              style={{
+                                flex: 1,
+                                height: '8px',
+                                background: 'rgba(255,255,255,0.08)',
+                                borderRadius: '99px',
+                                overflow: 'hidden',
+                              }}
+                            >
+                              <div
+                                style={{
+                                  width: `${s.rate}%`,
+                                  height: '100%',
+                                  background: rateColor,
+                                  borderRadius: '99px',
+                                  transition: 'width 0.3s ease',
+                                }}
+                              />
+                            </div>
+                            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: rateColor, minWidth: '35px' }}>
+                              {s.rate}%
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB CONTENT 3: HISTORIAL DETALLADO */}
       {activeTab === 'historial' && (
         <div className="card table-container">
           {filteredRecords.length === 0 ? (
@@ -588,7 +1018,7 @@ export default function AsistenciasUI({
                   <th style={{ width: '100px' }}>Categoría</th>
                   <th style={{ width: '140px' }}>Turno</th>
                   <th style={{ width: '140px' }}>Profesor</th>
-                  <th style={{ width: '120px', textAlign: 'center' }}>Estado</th>
+                  <th style={{ width: '130px', textAlign: 'center' }}>Estado</th>
                 </tr>
               </thead>
               <tbody>
@@ -613,13 +1043,19 @@ export default function AsistenciasUI({
                     </td>
                     <td style={{ textAlign: 'center' }}>
                       {rec.status === 'PRESENT' && (
-                        <span className="badge badge-success">✓ Presente</span>
+                        <div className="matrix-cell status-paid" style={{ display: 'inline-flex', width: 'auto', padding: '0 0.6rem', height: '24px' }}>
+                          ✓ Presente
+                        </div>
                       )}
                       {rec.status === 'LATE' && (
-                        <span className="badge badge-warning">⏱ Tarde</span>
+                        <div className="matrix-cell status-partial" style={{ display: 'inline-flex', width: 'auto', padding: '0 0.6rem', height: '24px' }}>
+                          ⏱ Tarde
+                        </div>
                       )}
                       {rec.status === 'ABSENT' && (
-                        <span className="badge badge-danger">✗ Ausente</span>
+                        <div className="matrix-cell status-danger" style={{ display: 'inline-flex', width: 'auto', padding: '0 0.6rem', height: '24px' }}>
+                          ✗ Ausente
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -630,98 +1066,7 @@ export default function AsistenciasUI({
         </div>
       )}
 
-      {/* TAB CONTENT 2: RESUMEN POR ALUMNO */}
-      {activeTab === 'alumnos' && (
-        <div className="card table-container">
-          {studentSummaries.length === 0 ? (
-            <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-              <p style={{ fontSize: '1.2rem', marginBottom: '0.5rem' }}>No hay alumnos que coincidan con la búsqueda.</p>
-            </div>
-          ) : (
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Alumno</th>
-                  <th style={{ width: '110px' }}>Categoría</th>
-                  <th style={{ width: '130px' }}>Turno</th>
-                  <th style={{ width: '130px' }}>Profesor</th>
-                  <th style={{ width: '90px', textAlign: 'center' }}>Clases</th>
-                  <th style={{ width: '90px', textAlign: 'center' }}>Presentes</th>
-                  <th style={{ width: '80px', textAlign: 'center' }}>Tardes</th>
-                  <th style={{ width: '90px', textAlign: 'center' }}>Faltas</th>
-                  <th style={{ width: '160px' }}>% Asistencia</th>
-                </tr>
-              </thead>
-              <tbody>
-                {studentSummaries.map((s) => {
-                  const rateColor =
-                    s.rate >= 75 ? 'var(--success)' : s.rate >= 50 ? 'var(--warning)' : 'var(--danger)';
-
-                  return (
-                    <tr key={s.id}>
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <strong style={{ color: '#fff', fontSize: '0.9rem' }}>{s.name}</strong>
-                          {s.absent >= 3 && (
-                            <span className="badge badge-danger" title="Alumno con 3 o más faltas registradas">
-                              ⚠️ {s.absent} Faltas
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td>
-                        <span className="badge badge-secondary">Cat. {s.category}</span>
-                      </td>
-                      <td>
-                        <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>{s.turno}</span>
-                      </td>
-                      <td>
-                        <span style={{ color: 'var(--secondary)' }}>Prof. {s.teacher_name}</span>
-                      </td>
-                      <td style={{ textAlign: 'center', fontWeight: 600 }}>{s.total}</td>
-                      <td style={{ textAlign: 'center', color: 'var(--success)', fontWeight: 600 }}>
-                        {s.present}
-                      </td>
-                      <td style={{ textAlign: 'center', color: 'var(--warning)' }}>{s.late}</td>
-                      <td style={{ textAlign: 'center', color: s.absent > 0 ? 'var(--danger)' : 'var(--text-dim)', fontWeight: 700 }}>
-                        {s.absent}
-                      </td>
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <div
-                            style={{
-                              flex: 1,
-                              height: '8px',
-                              background: 'rgba(255,255,255,0.08)',
-                              borderRadius: '99px',
-                              overflow: 'hidden',
-                            }}
-                          >
-                            <div
-                              style={{
-                                width: `${s.rate}%`,
-                                height: '100%',
-                                background: rateColor,
-                                borderRadius: '99px',
-                                transition: 'width 0.3s ease',
-                              }}
-                            />
-                          </div>
-                          <span style={{ fontSize: '0.75rem', fontWeight: 700, color: rateColor, minWidth: '35px' }}>
-                            {s.rate}%
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
-
-      {/* TAB CONTENT 3: POR PROFESOR Y TURNO */}
+      {/* TAB CONTENT 4: POR PROFESOR Y TURNO */}
       {activeTab === 'profesores' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem' }}>
           {teacherMetrics.map((t) => (
