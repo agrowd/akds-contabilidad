@@ -74,6 +74,43 @@ async function migrate() {
         console.log('rendido already exists or error:', e.message);
     }
 
+    try {
+        await db.run('ALTER TABLE students ADD COLUMN birth_date TEXT');
+        console.log('Added birth_date to students');
+    } catch (e: any) {
+        console.log('birth_date already exists or error:', e.message);
+    }
+
+    try {
+        await db.run('ALTER TABLE students ADD COLUMN medical_certificate_date TEXT');
+        console.log('Added medical_certificate_date to students');
+    } catch (e: any) {
+        console.log('medical_certificate_date already exists or error:', e.message);
+    }
+
+    try {
+        await db.run('ALTER TABLE students ADD COLUMN academia_id TEXT');
+        console.log('Added academia_id to students');
+    } catch (e: any) {
+        console.log('academia_id already exists or error:', e.message);
+    }
+
+    // Also migrate Academia DB
+    try {
+        const { getAttendancePool } = await import('../lib/attendanceDb');
+        const acPool = getAttendancePool();
+        await acPool.query(`
+            ALTER TABLE "Student" ADD COLUMN IF NOT EXISTS "status" TEXT DEFAULT 'ACTIVE';
+            ALTER TABLE "Student" ADD COLUMN IF NOT EXISTS "debt_status" TEXT DEFAULT 'AL_DIA';
+            ALTER TABLE "Student" ADD COLUMN IF NOT EXISTS "debt_details" TEXT DEFAULT '';
+            ALTER TABLE "Student" ADD COLUMN IF NOT EXISTS "crm_id" INTEGER;
+            ALTER TABLE "Student" ADD COLUMN IF NOT EXISTS "medical_certificate_status" TEXT DEFAULT 'SIN_FICHA';
+        `);
+        console.log('Migrated Academia Student columns successfully');
+    } catch (e: any) {
+        console.log('Error migrating Academia Student:', e.message);
+    }
+
     console.log('Migration finished.');
     process.exit(0);
 }

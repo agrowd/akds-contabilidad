@@ -34,6 +34,9 @@ async function resetAndRebuildDb() {
             notes TEXT DEFAULT '',
             monthly_quota REAL DEFAULT 0,
             phone TEXT,
+            birth_date TEXT,
+            medical_certificate_date TEXT,
+            academia_id TEXT,
             enrollment_date TEXT DEFAULT '2026-02-01',
             period_end_date TEXT DEFAULT '2026-12-31'
         );
@@ -133,6 +136,9 @@ async function resetAndRebuildDb() {
             notes TEXT DEFAULT '',
             monthly_quota REAL DEFAULT 0,
             phone TEXT,
+            birth_date TEXT,
+            medical_certificate_date TEXT,
+            academia_id TEXT,
             enrollment_date TEXT DEFAULT '2026-02-01',
             period_end_date TEXT DEFAULT '2026-12-31'
         );

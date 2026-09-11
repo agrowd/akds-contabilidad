@@ -21,6 +21,8 @@ export default function AddStudentModal({ isOpen, onClose, categories }: AddStud
     notes: '',
     monthly_quota: '',
     phone: '',
+    birth_date: '',
+    medical_certificate_date: '',
     enrollment_date: `${currentYear}-02-01`,
     period_end_date: `${currentYear}-12-31`
   });
@@ -53,6 +55,8 @@ export default function AddStudentModal({ isOpen, onClose, categories }: AddStud
         notes: '', 
         monthly_quota: '', 
         phone: '', 
+        birth_date: '',
+        medical_certificate_date: '',
         enrollment_date: `${currentYear}-02-01`,
         period_end_date: `${currentYear}-12-31`
       });
@@ -141,6 +145,29 @@ export default function AddStudentModal({ isOpen, onClose, categories }: AddStud
                   className="form-input" 
                   placeholder="Ej: 5491112345678" 
                   value={formData.phone}
+                  onChange={handleChange}
+                />
+              </div>
+            </div>
+
+            <div className="grid-cols-2">
+              <div className="form-group animate-in animate-in-delay-3">
+                <label className="form-label">🎂 Fecha de Nacimiento</label>
+                <input 
+                  type="date" 
+                  name="birth_date" 
+                  className="form-input" 
+                  value={formData.birth_date}
+                  onChange={handleChange}
+                />
+              </div>
+              <div className="form-group animate-in animate-in-delay-3">
+                <label className="form-label">🏥 Ficha Médica (Emisión)</label>
+                <input 
+                  type="date" 
+                  name="medical_certificate_date" 
+                  className="form-input" 
+                  value={formData.medical_certificate_date}
                   onChange={handleChange}
                 />
               </div>

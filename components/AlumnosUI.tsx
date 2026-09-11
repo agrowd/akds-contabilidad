@@ -9,6 +9,8 @@ import {
   deleteStudent, 
   deletePayment, 
   updateStudent, 
+  toggleStudentBaja,
+  syncStudentsWithAcademiaAction,
   toggleMonthPayment,
   addCatalogItem,
   addExtraCharge,
@@ -17,6 +19,89 @@ import {
   deleteExtraCharge
 } from '@/lib/actions';
 import { exportToExcel, exportToPDF } from '@/lib/export';
+
+export function getMedicalCertificateStatus(certDateStr?: string | null): {
+  status: 'VIGENTE' | 'POR_VENCER' | 'VENCIDA' | 'SIN_FICHA';
+  label: string;
+  badgeClass: string;
+  symbol: string;
+  daysRemaining: number | null;
+  expirationDateStr: string | null;
+} {
+  if (!certDateStr) {
+    return {
+      status: 'SIN_FICHA',
+      label: 'Sin Ficha Médica',
+      badgeClass: 'badge-danger',
+      symbol: '❌',
+      daysRemaining: null,
+      expirationDateStr: null,
+    };
+  }
+
+  const certTime = new Date(certDateStr).getTime();
+  if (isNaN(certTime)) {
+    return {
+      status: 'SIN_FICHA',
+      label: 'Sin Ficha Médica',
+      badgeClass: 'badge-danger',
+      symbol: '❌',
+      daysRemaining: null,
+      expirationDateStr: null,
+    };
+  }
+
+  const now = new Date().getTime();
+  const daysElapsed = Math.floor((now - certTime) / (1000 * 60 * 60 * 24));
+  const daysRemaining = 365 - daysElapsed;
+
+  const expDate = new Date(certTime + 365 * 24 * 60 * 60 * 1000);
+  const expDateStr = expDate.toISOString().split('T')[0];
+
+  if (daysRemaining < 0) {
+    return {
+      status: 'VENCIDA',
+      label: `Vencida (${Math.abs(daysRemaining)}d atrás)`,
+      badgeClass: 'badge-danger',
+      symbol: '🔴',
+      daysRemaining,
+      expirationDateStr: expDateStr,
+    };
+  }
+
+  if (daysRemaining <= 30) {
+    return {
+      status: 'POR_VENCER',
+      label: `¡Por Vencer! (${daysRemaining}d restantes)`,
+      badgeClass: 'badge-warning',
+      symbol: '🟡',
+      daysRemaining,
+      expirationDateStr: expDateStr,
+    };
+  }
+
+  return {
+    status: 'VIGENTE',
+    label: `Vigente (${daysRemaining}d restantes)`,
+    badgeClass: 'badge-success',
+    symbol: '🟢',
+    daysRemaining,
+    expirationDateStr: expDateStr,
+  };
+}
+
+export function calculateAge(birthDateStr?: string | null): string | null {
+  if (!birthDateStr) return null;
+  const birth = new Date(birthDateStr);
+  if (isNaN(birth.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
+    age--;
+  }
+  return `${age} años`;
+}
 
 interface Student {
   id: number;
@@ -29,6 +114,9 @@ interface Student {
   notes: string;
   monthly_quota: number;
   phone: string;
+  birth_date?: string | null;
+  medical_certificate_date?: string | null;
+  academia_id?: string | null;
   enrollment_date: string;
   period_end_date?: string;
   payment_count: number;
@@ -114,6 +202,7 @@ export default function AlumnosUI({
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [rubroFilter, setRubroFilter] = useState('ALL');
+  const [medicalFilter, setMedicalFilter] = useState('ALL');
   const [selectedStudent, setSelectedStudent] = useState<number | null>(initialSelectedStudentId || null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -121,6 +210,9 @@ export default function AlumnosUI({
   const [isEditStudentModalOpen, setIsEditStudentModalOpen] = useState(false);
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isSyncingAcademia, setIsSyncingAcademia] = useState(false);
+  const [tempMedicalDate, setTempMedicalDate] = useState('');
+  const [isSavingMedicalDate, setIsSavingMedicalDate] = useState(false);
 
   // Tabs for the student card details
   const [activeTab, setActiveTab] = useState<'CUOTAS' | 'ESPECIALES'>('CUOTAS');
@@ -131,6 +223,16 @@ export default function AlumnosUI({
       setSelectedStudent(initialSelectedStudentId);
     }
   }, [initialSelectedStudentId]);
+
+  // Sync tempMedicalDate when selected student changes
+  React.useEffect(() => {
+    if (selectedStudent) {
+      const current = students.find(s => s.id === selectedStudent);
+      setTempMedicalDate(current?.medical_certificate_date ? current.medical_certificate_date.substring(0, 10) : '');
+    } else {
+      setTempMedicalDate('');
+    }
+  }, [selectedStudent, students]);
   
   // Extra charge form state
   const [ecRubro, setEcRubro] = useState('FICHAJE');
@@ -274,6 +376,63 @@ export default function AlumnosUI({
       if (!result.success) {
           alert('Error: ' + result.error);
       }
+  };
+
+  const handleToggleBaja = async (student: Student) => {
+    const isBaja = student.status === 'BAJA';
+    const actionText = isBaja ? 'reactivar' : 'dar de BAJA';
+    const confirmMsg = isBaja 
+      ? `¿Desea reactivar a ${student.name} como alumno activo?`
+      : `¿Confirma dar de BAJA a ${student.name}?\n\nIMPORTANTE: No se perderá ningún dato. Se conservarán todos sus cobros, registros y asistencias históricas, pero el alumno dejará de figurar en el llamado de lista diario de los profesores.`;
+    if (!confirm(confirmMsg)) return;
+
+    const res = await toggleStudentBaja(student.id, student.status);
+    if (!res.success) {
+      alert('Error al cambiar estado de baja: ' + res.error);
+    }
+  };
+
+  const handleWhatsAppMedical = (student: Student) => {
+    const med = getMedicalCertificateStatus(student.medical_certificate_date);
+    let message = '';
+    if (med.status === 'SIN_FICHA') {
+      message = `Hola ${student.name}! Te contactamos de AKDs para recordarte que tenés pendiente la presentación de la Ficha Médica anual obligatoria para poder participar de las actividades y entrenamientos. Por favor solicitala a tu médico y acercala a la brevedad. ¡Muchas gracias!`;
+    } else if (med.status === 'POR_VENCER') {
+      message = `Hola ${student.name}! Te contactamos de AKDs para avisarte que tu Ficha Médica anual está próxima a vencer (${med.label}). Te pedimos que vayas gestionando el turno médico para renovarla y presentarla con tiempo. ¡Muchas gracias!`;
+    } else if (med.status === 'VENCIDA') {
+      message = `Hola ${student.name}! Te contactamos de AKDs para informarte que tu Ficha Médica anual se encuentra VENCIDA (${med.label}). Para cuidar tu salud y poder seguir entrenando de forma segura, solicitamos renovarla y presentarla con urgencia. ¡Muchas gracias!`;
+    } else {
+      message = `Hola ${student.name}! Tu Ficha Médica anual en AKDs está vigente hasta ${med.expirationDateStr}. ¡Gracias por mantener tu documentación al día!`;
+    }
+
+    const phone = student.phone || prompt('Ingrese el número de WhatsApp (sin +):');
+    if (!phone) return;
+
+    const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+    window.open(url, '_blank');
+  };
+
+  const handleSaveMedicalDate = async () => {
+    if (!selectedStudent) return;
+    setIsSavingMedicalDate(true);
+    const res = await updateStudent(selectedStudent, {
+      medical_certificate_date: tempMedicalDate || null
+    });
+    setIsSavingMedicalDate(false);
+    if (!res.success) {
+      alert('Error al guardar fecha de ficha médica: ' + res.error);
+    }
+  };
+
+  const handleSyncAcademia = async () => {
+    setIsSyncingAcademia(true);
+    const res = await syncStudentsWithAcademiaAction();
+    setIsSyncingAcademia(false);
+    if (res.success) {
+      alert(res.message);
+    } else {
+      alert('Error al sincronizar con Academia: ' + res.error);
+    }
   };
 
   const handleWhatsApp = (student: Student) => {
@@ -549,8 +708,14 @@ export default function AlumnosUI({
         return charges.some(ec => ec.rubro === rubroFilter);
       });
     }
+    if (medicalFilter !== 'ALL') {
+      result = result.filter(s => {
+        const med = getMedicalCertificateStatus(s.medical_certificate_date);
+        return med.status === medicalFilter;
+      });
+    }
     return result;
-  }, [computedStudents, search, categoryFilter, statusFilter, rubroFilter, extraChargesByStudent]);
+  }, [computedStudents, search, categoryFilter, statusFilter, rubroFilter, medicalFilter, extraChargesByStudent]);
 
   const handleExportExcel = () => {
     const data = filtered.map(s => ({
@@ -641,8 +806,38 @@ export default function AlumnosUI({
         >
           <option value="ACTIVE">Activos</option>
           <option value="SUSPENDIDO">Suspendidos</option>
+          <option value="BAJA">Dados de Baja</option>
           <option value="ALL">Todos los Estados</option>
         </select>
+        <select
+          className="filter-select"
+          value={medicalFilter}
+          onChange={e => setMedicalFilter(e.target.value)}
+          style={{ marginLeft: '0.5rem' }}
+        >
+          <option value="ALL">Ficha Médica: Todas</option>
+          <option value="VIGENTE">🟢 Ficha Vigente</option>
+          <option value="POR_VENCER">🟡 Por Vencer (&lt; 30d)</option>
+          <option value="VENCIDA">🔴 Ficha Vencida</option>
+          <option value="SIN_FICHA">❌ Sin Ficha Médica</option>
+        </select>
+        <button
+          onClick={handleSyncAcademia}
+          disabled={isSyncingAcademia}
+          className="btn glass-hover"
+          title="Sincronizar alumnos, deudas y fichas médicas con la app de asistencia (Academia)"
+          style={{ 
+            background: 'rgba(59, 130, 246, 0.15)', 
+            borderColor: 'rgba(59, 130, 246, 0.4)', 
+            color: '#60a5fa', 
+            padding: '0.4rem 0.8rem', 
+            fontSize: '0.8rem',
+            marginLeft: '0.5rem',
+            whiteSpace: 'nowrap'
+          }}
+        >
+          {isSyncingAcademia ? '⏳ Sincronizando...' : '🔄 Sync Academia'}
+        </button>
         <div style={{ display: 'flex', gap: '0.5rem', marginLeft: 'auto' }}>
           <button onClick={handleExportExcel} className="btn" style={{ background: '#217346', color: 'white', border: 'none', padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}>
             📊 Excel
@@ -757,38 +952,63 @@ export default function AlumnosUI({
                 <tr>
                   <th>Nombre</th>
                   <th>Categoría</th>
+                  <th className="text-center" title="Edad según fecha de nacimiento">Edad</th>
+                  <th className="text-center" title="Estado de la ficha médica anual (Vence a los 365 días)">Ficha Méd.</th>
                   <th className="text-center">Pagos</th>
                   <th className="text-right">Total Pagado</th>
-                  <th className="text-center">Estado de Pago</th>
+                  <th className="text-center">Estado</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(s => (
-                  <tr
-                    key={s.id}
-                    onClick={() => setSelectedStudent(s.id === selectedStudent ? null : s.id)}
-                    style={{ cursor: 'pointer', background: s.id === selectedStudent ? 'rgba(0, 255, 136, 0.05)' : undefined }}
-                  >
-                    <td style={{ fontWeight: 600 }}>{s.name}</td>
-                    <td><span className="category-badge">{s.category}</span></td>
-                    <td className="text-center">{s.payment_count}</td>
-                    <td className="text-right" style={{ fontWeight: 600 }}>
-                      {s.total_paid > 0 ? `$${(s.total_paid || 0).toLocaleString()}` : '-'}
-                    </td>
-                    <td className="text-center">
-                      {s.status === 'SUSPENDIDO' 
-                        ? <span className="badge badge-secondary">Suspendido</span>
-                        : s.months_unpaid > 2
-                          ? <span className="badge badge-danger">Moroso</span>
-                          : s.months_unpaid > 0
-                            ? <span className="badge badge-warning">Pendiente</span>
-                            : s.payment_count > 0
-                              ? <span className="badge badge-success">Al día</span>
-                              : <span className="badge badge-secondary">Sin datos</span>
-                      }
-                    </td>
-                  </tr>
-                ))}
+                {filtered.map(s => {
+                  const med = getMedicalCertificateStatus(s.medical_certificate_date);
+                  const age = calculateAge(s.birth_date);
+                  return (
+                    <tr
+                      key={s.id}
+                      onClick={() => setSelectedStudent(s.id === selectedStudent ? null : s.id)}
+                      style={{ 
+                        cursor: 'pointer', 
+                        background: s.id === selectedStudent ? 'rgba(0, 255, 136, 0.05)' : undefined,
+                        opacity: s.status === 'BAJA' ? 0.65 : 1
+                      }}
+                    >
+                      <td style={{ fontWeight: 600 }}>
+                        {s.name}
+                        {s.status === 'BAJA' && (
+                          <span className="badge" style={{ marginLeft: '0.4rem', fontSize: '0.65rem', background: 'rgba(239, 68, 68, 0.2)', color: '#f87171' }}>
+                            BAJA
+                          </span>
+                        )}
+                      </td>
+                      <td><span className="category-badge">{s.category}</span></td>
+                      <td className="text-center" style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                        {age || '-'}
+                      </td>
+                      <td className="text-center" title={med.label}>
+                        <span style={{ fontSize: '1rem', cursor: 'help' }}>{med.symbol}</span>
+                      </td>
+                      <td className="text-center">{s.payment_count}</td>
+                      <td className="text-right" style={{ fontWeight: 600 }}>
+                        {s.total_paid > 0 ? `$${(s.total_paid || 0).toLocaleString()}` : '-'}
+                      </td>
+                      <td className="text-center">
+                        {s.status === 'BAJA'
+                          ? <span className="badge badge-danger">Baja</span>
+                          : s.status === 'SUSPENDIDO' 
+                            ? <span className="badge badge-secondary">Suspendido</span>
+                            : s.months_unpaid > 2
+                              ? <span className="badge badge-danger">Moroso</span>
+                              : s.months_unpaid > 0
+                                ? <span className="badge badge-warning">Pendiente</span>
+                                : s.payment_count > 0
+                                  ? <span className="badge badge-success">Al día</span>
+                                  : <span className="badge badge-secondary">Sin datos</span>
+                        }
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -813,8 +1033,18 @@ export default function AlumnosUI({
                   {selected.group_name && <span className="badge badge-secondary">{selected.group_name}</span>}
                   {selected.team && <span className="badge badge-secondary">Equipo {selected.team}</span>}
                   {selected.gender && <span className="badge badge-secondary">{selected.gender === 'M' ? '♂ Masc' : '♀ Fem'}</span>}
+                  {selected.birth_date && (
+                    <span className="badge badge-secondary" title={`Fecha de Nacimiento: ${selected.birth_date.substring(0, 10)}`}>
+                      🎂 {selected.birth_date.substring(0, 10)} ({calculateAge(selected.birth_date) || 's/d'})
+                    </span>
+                  )}
+                  {selected.status === 'BAJA' && (
+                    <span className="badge" style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', border: '1px solid rgba(239,68,68,0.4)', fontWeight: 700 }}>
+                      🚫 DADO DE BAJA
+                    </span>
+                  )}
                 </div>
-                <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem' }}>
+                <div style={{ marginTop: '0.75rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
                   <button 
                     className="btn btn-primary glass-hover" 
                     style={{ fontSize: '0.75rem', padding: '0.4rem 0.8rem', boxShadow: '0 0 15px var(--primary-glow)' }}
@@ -862,6 +1092,20 @@ export default function AlumnosUI({
                     {selected.status === 'SUSPENDIDO' ? '▶️ Reactivar' : '⏸️ Suspender'}
                   </button>
                   <button 
+                    className="btn glass-hover" 
+                    style={{ 
+                        fontSize: '0.75rem', 
+                        padding: '0.4rem 0.8rem', 
+                        background: selected.status === 'BAJA' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)', 
+                        borderColor: selected.status === 'BAJA' ? 'rgba(34, 197, 94, 0.4)' : 'rgba(239, 68, 68, 0.4)',
+                        color: selected.status === 'BAJA' ? '#4ade80' : '#f87171'
+                    }}
+                    onClick={() => handleToggleBaja(selected)}
+                    title={selected.status === 'BAJA' ? 'Reactivar alumno' : 'Dar de baja sin perder registros ni historial'}
+                  >
+                    {selected.status === 'BAJA' ? '▶️ Reactivar Baja' : '🚫 Dar de Baja'}
+                  </button>
+                  <button 
                     className="btn btn-secondary glass-hover" 
                     style={{ 
                       fontSize: '0.75rem', 
@@ -886,7 +1130,7 @@ export default function AlumnosUI({
             </div>
 
             {/* DETAIL GRID */}
-            <div className="student-detail-grid" style={{ marginBottom: '1.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '1rem' }}>
+            <div className="student-detail-grid" style={{ marginBottom: '1.25rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '1rem' }}>
               <div className="detail-item glass" style={{ padding: '0.75rem', textAlign: 'center' }}>
                 <span className="detail-label" style={{ fontSize: '0.65rem', display: 'block', marginBottom: '0.2rem' }}>Total Pagado</span>
                 <span className="detail-value text-success" style={{ fontWeight: 700 }}>${(selected.total_paid || 0).toLocaleString()}</span>
@@ -915,6 +1159,95 @@ export default function AlumnosUI({
                 </span>
               </div>
             </div>
+
+            {/* MEDICAL CERTIFICATE & HEALTH CARD */}
+            {(() => {
+              const med = getMedicalCertificateStatus(selected.medical_certificate_date);
+              return (
+                <div 
+                  className="glass" 
+                  style={{ 
+                    marginBottom: '1.25rem', 
+                    padding: '0.85rem 1rem', 
+                    borderRadius: '10px', 
+                    border: med.status === 'VENCIDA' || med.status === 'SIN_FICHA'
+                      ? '1px solid rgba(239, 68, 68, 0.4)'
+                      : med.status === 'POR_VENCER'
+                        ? '1px solid rgba(245, 158, 11, 0.4)'
+                        : '1px solid rgba(34, 197, 94, 0.3)',
+                    background: med.status === 'VENCIDA' || med.status === 'SIN_FICHA'
+                      ? 'rgba(239, 68, 68, 0.06)'
+                      : med.status === 'POR_VENCER'
+                        ? 'rgba(245, 158, 11, 0.06)'
+                        : 'rgba(34, 197, 94, 0.06)'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.6rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                      <span style={{ fontSize: '1.3rem' }}>🏥</span>
+                      <div>
+                        <div style={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-dim)' }}>
+                          Ficha Médica Anual (Vigencia 365 días)
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.15rem' }}>
+                          <span style={{ fontSize: '1.1rem' }}>{med.symbol}</span>
+                          <span style={{ fontWeight: 700, fontSize: '0.9rem', color: med.status === 'VIGENTE' ? '#4ade80' : med.status === 'POR_VENCER' ? '#fbbf24' : '#f87171' }}>
+                            {med.label}
+                          </span>
+                          {med.expirationDateStr && (
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                              (Vence: {med.expirationDateStr})
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Fecha:</span>
+                        <input
+                          type="date"
+                          className="search-input"
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem', width: '135px' }}
+                          value={tempMedicalDate}
+                          onChange={e => setTempMedicalDate(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem' }}
+                          onClick={handleSaveMedicalDate}
+                          disabled={isSavingMedicalDate}
+                          title="Guardar fecha de ficha médica"
+                        >
+                          {isSavingMedicalDate ? '...' : '💾'}
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        className="btn glass-hover"
+                        style={{
+                          fontSize: '0.75rem',
+                          padding: '0.35rem 0.75rem',
+                          background: 'rgba(37, 211, 102, 0.15)',
+                          borderColor: 'rgba(37, 211, 102, 0.4)',
+                          color: '#25D366',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.3rem'
+                        }}
+                        onClick={() => handleWhatsAppMedical(selected)}
+                        title="Enviar mensaje por WhatsApp solicitando o alertando sobre la ficha médica"
+                      >
+                        📱 Solicitar Ficha
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* TABS HEADER */}
             <div className="ficha-tabs" style={{ display: 'flex', borderBottom: '1px solid rgba(255, 255, 255, 0.1)', marginBottom: '1.25rem', gap: '1.5rem' }}>

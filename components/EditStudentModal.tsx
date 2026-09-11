@@ -14,8 +14,10 @@ interface StudentData {
   notes: string;
   monthly_quota: number;
   phone: string;
+  birth_date?: string | null;
+  medical_certificate_date?: string | null;
   enrollment_date: string;
-  period_end_date?: string;
+  period_end_date?: string | null;
 }
 
 interface EditStudentModalProps {
@@ -35,6 +37,8 @@ export default function EditStudentModal({ isOpen, onClose, student }: EditStude
     notes: '',
     monthly_quota: '',
     phone: '',
+    birth_date: '',
+    medical_certificate_date: '',
     enrollment_date: '',
     period_end_date: ''
   });
@@ -50,6 +54,8 @@ export default function EditStudentModal({ isOpen, onClose, student }: EditStude
         notes: student.notes || '',
         monthly_quota: student.monthly_quota ? student.monthly_quota.toString() : '0',
         phone: student.phone || '',
+        birth_date: student.birth_date ? student.birth_date.substring(0, 10) : '',
+        medical_certificate_date: student.medical_certificate_date ? student.medical_certificate_date.substring(0, 10) : '',
         enrollment_date: student.enrollment_date ? student.enrollment_date.substring(0, 10) : '',
         period_end_date: student.period_end_date ? student.period_end_date.substring(0, 10) : '2026-12-31'
       });
@@ -71,6 +77,8 @@ export default function EditStudentModal({ isOpen, onClose, student }: EditStude
       notes: formData.notes,
       monthly_quota: formData.monthly_quota ? parseFloat(formData.monthly_quota) : 0,
       phone: formData.phone,
+      birth_date: formData.birth_date || null,
+      medical_certificate_date: formData.medical_certificate_date || null,
       enrollment_date: formData.enrollment_date,
       period_end_date: formData.period_end_date
     };
@@ -164,6 +172,29 @@ export default function EditStudentModal({ isOpen, onClose, student }: EditStude
                   className="form-input" 
                   placeholder="Ej: 5491112345678" 
                   value={formData.phone}
+                  onChange={handleChange}
+                />
+              </div>
+            </div>
+
+            <div className="grid-cols-2">
+              <div className="form-group animate-in animate-in-delay-3">
+                <label className="form-label">🎂 Fecha de Nacimiento</label>
+                <input 
+                  type="date" 
+                  name="birth_date" 
+                  className="form-input" 
+                  value={formData.birth_date}
+                  onChange={handleChange}
+                />
+              </div>
+              <div className="form-group animate-in animate-in-delay-3">
+                <label className="form-label">🏥 Ficha Médica (Emisión)</label>
+                <input 
+                  type="date" 
+                  name="medical_certificate_date" 
+                  className="form-input" 
+                  value={formData.medical_certificate_date}
                   onChange={handleChange}
                 />
               </div>

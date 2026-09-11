@@ -12,7 +12,7 @@ export default async function AlumnosPage({ searchParams }: { searchParams: Prom
   // All students with their payment summary
   const students = await db.all(`
     SELECT 
-      s.id, s.name, s.category, s.group_name, s.gender, s.team, s.status, s.notes, s.monthly_quota, s.phone, s.enrollment_date, s.period_end_date,
+      s.id, s.name, s.category, s.group_name, s.gender, s.team, s.status, s.notes, s.monthly_quota, s.phone, s.birth_date, s.medical_certificate_date, s.academia_id, s.enrollment_date, s.period_end_date,
       (SELECT COUNT(*) FROM payments p WHERE p.student_id = s.id AND p.payment_date LIKE ?) as payment_count,
       (SELECT COALESCE(SUM(p.amount_paid), 0) FROM payments p WHERE p.student_id = s.id AND p.payment_date LIKE ?) as total_paid,
       (SELECT COALESCE(SUM(p.balance), 0) FROM payments p WHERE p.student_id = s.id AND p.payment_date LIKE ?) as total_balance,

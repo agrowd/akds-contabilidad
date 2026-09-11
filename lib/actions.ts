@@ -75,12 +75,14 @@ export async function addStudent(formData: {
   notes?: string;
   monthly_quota?: number;
   phone?: string;
+  birth_date?: string; // YYYY-MM-DD
+  medical_certificate_date?: string; // YYYY-MM-DD
   enrollment_date?: string; // YYYY-MM-DD
   period_end_date?: string; // YYYY-MM-DD
   status?: string;
 }) {
   const db = await getDb();
-  const { name, category, group_name, gender, team, notes, monthly_quota, phone, enrollment_date, period_end_date, status } = formData;
+  const { name, category, group_name, gender, team, notes, monthly_quota, phone, birth_date, medical_certificate_date, enrollment_date, period_end_date, status } = formData;
 
   const finalStatus = status || 'ACTIVE';
   const finalEnrollment = enrollment_date || new Date().toISOString().split('T')[0];
@@ -88,11 +90,12 @@ export async function addStudent(formData: {
 
   try {
     const result = await db.run(
-      `INSERT INTO students (name, category, group_name, gender, team, status, notes, monthly_quota, phone, enrollment_date, period_end_date) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO students (name, category, group_name, gender, team, status, notes, monthly_quota, phone, birth_date, medical_certificate_date, enrollment_date, period_end_date) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
           name.toUpperCase(), category, group_name || '', gender || null, 
-          team || null, finalStatus, notes || '', monthly_quota || 0, phone || '', finalEnrollment, finalPeriodEnd
+          team || null, finalStatus, notes || '', monthly_quota || 0, phone || '', 
+          birth_date || null, medical_certificate_date || null, finalEnrollment, finalPeriodEnd
       ]
     );
 
@@ -377,6 +380,245 @@ export async function deleteStudent(id: number) {
     } catch (error: any) {
         await db.run('ROLLBACK');
         console.error('Error deleting student:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Toggles a student's status between ACTIVE (or SUSPENDIDO) and BAJA.
+ * Preserves all historical records, payments, and attendance without losing any data.
+ */
+export async function toggleStudentBaja(id: number, currentStatus: string) {
+    const db = await getDb();
+    const newStatus = currentStatus === 'BAJA' ? 'ACTIVE' : 'BAJA';
+    try {
+        await db.run('UPDATE students SET status = ? WHERE id = ?', [newStatus, id]);
+        
+        // Sync to Academia if linked
+        const student = await db.get('SELECT academia_id FROM students WHERE id = ?', [id]);
+        if (student?.academia_id) {
+            try {
+                const { getAttendancePool } = await import('./attendanceDb');
+                const pool = getAttendancePool();
+                await pool.query('UPDATE "Student" SET status = $1 WHERE id = $2', [newStatus, student.academia_id]);
+            } catch (acErr) {
+                console.error('Error syncing status to Academia:', acErr);
+            }
+        }
+
+        revalidatePath('/alumnos');
+        revalidatePath('/');
+        return { success: true, status: newStatus };
+    } catch (error: any) {
+        console.error('Error toggling student baja:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+function cleanTokens(name: string): string[] {
+  return (name || '')
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Z0-9 ]/g, " ")
+    .split(/\s+/)
+    .filter(t => t.length > 1 && !['DE', 'DEL', 'LA', 'LAS', 'LOS', 'Y'].includes(t));
+}
+
+function matchScore(tokensA: string[], tokensB: string[]): number {
+  if (tokensA.length === 0 || tokensB.length === 0) return 0;
+  const setB = new Set(tokensB);
+  let intersection = 0;
+  for (const t of tokensA) {
+    if (setB.has(t)) intersection++;
+  }
+  const union = new Set([...tokensA, ...tokensB]).size;
+  return intersection / union;
+}
+
+/**
+ * Synchronizes CRM students with Academia DB:
+ * - Computes debt and overdue statuses and pushes them to Academia
+ * - Computes medical certificate validity and pushes status
+ * - Pushes active / baja / suspendidio status
+ * - Creates missing infant students in Academia so the rosters match
+ */
+export async function syncStudentsWithAcademiaAction() {
+    const db = await getDb();
+    const { getAttendancePool } = await import('./attendanceDb');
+    const acPool = getAttendancePool();
+
+    try {
+        const crmStudents = await db.all(`
+            SELECT id, name, category, status, monthly_quota, phone, birth_date, medical_certificate_date, academia_id 
+            FROM students 
+            ORDER BY name ASC
+        `);
+
+        const currentYear = new Date().getFullYear().toString();
+        const currentMonthIdx = new Date().getMonth();
+        const currentDay = new Date().getDate();
+
+        // Get monthly statuses
+        const statuses = await db.all('SELECT student_id, month, status FROM monthly_status WHERE year = ?', [currentYear]);
+        const statusMap: Record<number, Record<string, string>> = {};
+        statuses.forEach((s: any) => {
+            const sid = Number(s.student_id);
+            if (!statusMap[sid]) statusMap[sid] = {};
+            statusMap[sid][s.month] = s.status;
+        });
+
+        // Get pending extra charges
+        const extraCharges = await db.all(`
+            SELECT student_id, amount, status FROM student_extra_charges WHERE status != 'PAID'
+        `);
+        const pendingEcMap: Record<number, number> = {};
+        extraCharges.forEach((ec: any) => {
+            const sid = Number(ec.student_id);
+            pendingEcMap[sid] = (pendingEcMap[sid] || 0) + Number(ec.amount || 0);
+        });
+
+        // Get Academia students
+        const acRes = await acPool.query(`SELECT id, name, category, turno, "teacherId", status FROM "Student"`);
+        const acStudents = acRes.rows;
+
+        // Default teacher (Rober or Santiago if needed)
+        const teachersRes = await acPool.query(`SELECT id, name FROM "Teacher"`);
+        const defaultTeacherId = teachersRes.rows[0]?.id || '86ed908e-0e8d-4305-99cf-7f9eb8c0a281';
+
+        let updatedCount = 0;
+        let createdCount = 0;
+
+        for (const cStudent of crmStudents) {
+            const sid = Number(cStudent.id);
+            const stMap = statusMap[sid] || {};
+            
+            // Calculate Debt Status
+            let unpaidMonths: string[] = [];
+            let hasPartial = false;
+
+            for (let i = 0; i <= currentMonthIdx; i++) {
+                const m = MONTHS[i];
+                const st = stMap[m];
+                if (st === 'PARTIAL') {
+                    hasPartial = true;
+                } else if (st === 'UNPAID' || (i < currentMonthIdx && !st) || (i === currentMonthIdx && currentDay > 10 && st !== 'PAID')) {
+                    unpaidMonths.push(m);
+                }
+            }
+
+            let debtStatus = 'AL_DIA';
+            let debtDetails = 'Al día';
+            const pendingEcAmount = pendingEcMap[sid] || 0;
+
+            if (unpaidMonths.length > 0) {
+                debtStatus = unpaidMonths.length >= 2 ? 'MOROSO' : 'DEBE_CUOTA';
+                debtDetails = `Debe ${unpaidMonths.join(', ')}`;
+                if (pendingEcAmount > 0) debtDetails += ` + Extra: $${pendingEcAmount.toLocaleString()}`;
+            } else if (hasPartial || pendingEcAmount > 0) {
+                debtStatus = 'PARCIAL';
+                debtDetails = `Saldo pendiente${pendingEcAmount > 0 ? ` (Extra: $${pendingEcAmount.toLocaleString()})` : ''}`;
+            }
+
+            // Calculate Medical Certificate Status
+            let medStatus = 'SIN_FICHA';
+            if (cStudent.medical_certificate_date) {
+                const certDate = new Date(cStudent.medical_certificate_date).getTime();
+                const now = new Date().getTime();
+                const daysElapsed = Math.floor((now - certDate) / (1000 * 60 * 60 * 24));
+                const daysRemaining = 365 - daysElapsed;
+                if (daysRemaining < 0) {
+                    medStatus = 'VENCIDA';
+                } else if (daysRemaining <= 30) {
+                    medStatus = 'POR_VENCER';
+                } else {
+                    medStatus = 'VIGENTE';
+                }
+            }
+
+            // Find matching Academia student
+            let matchedAc = acStudents.find(a => a.id === cStudent.academia_id);
+            if (!matchedAc) {
+                const cTokens = cleanTokens(cStudent.name);
+                let bestScore = 0;
+                for (const as of acStudents) {
+                    const aTokens = cleanTokens(as.name);
+                    const score = matchScore(cTokens, aTokens);
+                    if (score > bestScore) {
+                        bestScore = score;
+                        matchedAc = as;
+                    }
+                }
+                if (bestScore < 0.45) {
+                    matchedAc = null;
+                }
+            }
+
+            const studentStatus = cStudent.status === 'BAJA' ? 'BAJA' : (cStudent.status === 'SUSPENDIDO' ? 'SUSPENDIDO' : 'ACTIVE');
+
+            if (matchedAc) {
+                // Update Academia Student
+                await acPool.query(
+                    `UPDATE "Student" 
+                     SET status = $1, debt_status = $2, debt_details = $3, medical_certificate_status = $4, crm_id = $5, "birthDate" = COALESCE($6, "birthDate") 
+                     WHERE id = $7`,
+                    [
+                        studentStatus, 
+                        debtStatus, 
+                        debtDetails, 
+                        medStatus, 
+                        sid, 
+                        cStudent.birth_date ? new Date(cStudent.birth_date) : null,
+                        matchedAc.id
+                    ]
+                );
+                // Save link in CRM
+                if (cStudent.academia_id !== matchedAc.id) {
+                    await db.run('UPDATE students SET academia_id = ? WHERE id = ?', [matchedAc.id, sid]);
+                }
+                updatedCount++;
+            } else if (cStudent.category && !cStudent.category.toUpperCase().includes('ADULTO')) {
+                // Auto create in Academia for infant/juvenile categories if not exists
+                let catYear = 2016;
+                if (cStudent.birth_date) {
+                    const bYear = new Date(cStudent.birth_date).getFullYear();
+                    if (bYear >= 2010 && bYear <= 2026) catYear = bYear;
+                }
+                const newId = (await import('crypto')).randomUUID();
+                await acPool.query(
+                    `INSERT INTO "Student" (id, name, category, turno, "teacherId", status, debt_status, debt_details, medical_certificate_status, crm_id, "birthDate") 
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+                    [
+                        newId,
+                        cStudent.name,
+                        catYear,
+                        '1° turno',
+                        defaultTeacherId,
+                        studentStatus,
+                        debtStatus,
+                        debtDetails,
+                        medStatus,
+                        sid,
+                        cStudent.birth_date ? new Date(cStudent.birth_date) : null
+                    ]
+                );
+                await db.run('UPDATE students SET academia_id = ? WHERE id = ?', [newId, sid]);
+                createdCount++;
+            }
+        }
+
+        try {
+            revalidatePath('/alumnos');
+            revalidatePath('/asistencias');
+        } catch {
+            // Ignored outside Next.js request context (e.g. tests or CLI scripts)
+        }
+        return { 
+            success: true, 
+            message: `Sincronización completada con éxito: ${updatedCount} alumnos actualizados y ${createdCount} nuevos sincronizados.` 
+        };
+    } catch (error: any) {
+        console.error('Error syncing with Academia:', error);
         return { success: false, error: error.message };
     }
 }
