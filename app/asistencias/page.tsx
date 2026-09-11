@@ -6,13 +6,14 @@ export const dynamic = 'force-dynamic';
 
 export default async function AsistenciasPage() {
   try {
-    const { records, teachers, students } = await fetchAttendanceData();
+    const { records, teachers, students, notes } = await fetchAttendanceData();
 
     return (
       <AsistenciasUI
         initialRecords={records}
         teachers={teachers}
         students={students}
+        notes={notes}
       />
     );
   } catch (error: any) {

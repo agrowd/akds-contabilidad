@@ -43,10 +43,18 @@ export interface AttendanceStudentItem {
   teacher_name: string;
 }
 
+export interface AttendanceNoteItem {
+  id: string;
+  date: string;
+  turno: string;
+  category: number;
+  note: string;
+}
+
 export async function fetchAttendanceData() {
   const pool = getAttendancePool();
 
-  const [attRes, teachersRes, studentsRes] = await Promise.all([
+  const [attRes, teachersRes, studentsRes, notesRes] = await Promise.all([
     pool.query(`
       SELECT 
         a.id,
@@ -80,6 +88,11 @@ export async function fetchAttendanceData() {
       JOIN "Teacher" t ON s."teacherId" = t.id
       ORDER BY s.name ASC
     `),
+    pool.query(`
+      SELECT id, date, turno, category, note
+      FROM "AttendanceNote"
+      ORDER BY date DESC
+    `).catch(() => ({ rows: [] })),
   ]);
 
   const records: AttendanceRecordItem[] = attRes.rows.map((row) => ({
@@ -110,9 +123,18 @@ export async function fetchAttendanceData() {
     teacher_name: row.teacher_name,
   }));
 
+  const notes: AttendanceNoteItem[] = (notesRes?.rows || []).map((row: any) => ({
+    id: row.id,
+    date: row.date instanceof Date ? row.date.toISOString() : String(row.date),
+    turno: row.turno,
+    category: Number(row.category),
+    note: row.note,
+  }));
+
   return {
     records,
     teachers,
     students,
+    notes,
   };
 }

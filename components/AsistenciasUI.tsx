@@ -1,13 +1,14 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
-import { AttendanceRecordItem, AttendanceTeacherItem, AttendanceStudentItem } from '@/lib/attendanceDb';
+import { AttendanceRecordItem, AttendanceTeacherItem, AttendanceStudentItem, AttendanceNoteItem } from '@/lib/attendanceDb';
 import { exportToExcel, exportToPDF } from '@/lib/export';
 
 interface AsistenciasUIProps {
   initialRecords: AttendanceRecordItem[];
   teachers: AttendanceTeacherItem[];
   students: AttendanceStudentItem[];
+  notes?: AttendanceNoteItem[];
 }
 
 interface StudentDayRecord {
@@ -34,6 +35,7 @@ export default function AsistenciasUI({
   initialRecords,
   teachers,
   students,
+  notes = [],
 }: AsistenciasUIProps) {
   const [activeTab, setActiveTab] = useState<'matriz' | 'alumnos' | 'historial' | 'profesores'>('matriz');
   const [search, setSearch] = useState('');
@@ -510,6 +512,34 @@ export default function AsistenciasUI({
           👨‍🏫 Por Profesor ({teacherMetrics.length})
         </button>
       </div>
+
+      {/* Observaciones / Descargos registrados */}
+      {notes && notes.length > 0 && (
+        <div style={{ marginBottom: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+          {notes.map((n) => (
+            <div
+              key={n.id}
+              className="card"
+              style={{
+                padding: '0.85rem 1.25rem',
+                borderColor: 'rgba(59, 130, 246, 0.3)',
+                background: 'rgba(59, 130, 246, 0.05)',
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '0.75rem',
+              }}
+            >
+              <span style={{ fontSize: '1.2rem', lineHeight: 1 }}>📝</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                <strong style={{ fontSize: '0.85rem', color: '#93c5fd' }}>
+                  Descargo / Observación — {n.turno} (Cat. {n.category}) · {parseDateShort(n.date).fullDate}:
+                </strong>
+                <p style={{ margin: 0, fontSize: '0.9rem', color: '#fff', whiteSpace: 'pre-wrap' }}>{n.note}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Filters Bar */}
       <div className="card" style={{ padding: '1rem', marginBottom: '1.5rem' }}>
