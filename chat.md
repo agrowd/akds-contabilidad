@@ -1,4 +1,4 @@
-﻿# Registro de Conversaciones - AKDs CRM
+# Registro de Conversaciones - AKDs CRM
 
 ## Sesión: 2026-09-11
 ### Requerimiento del Usuario:
@@ -21,3 +21,11 @@
    - Prisma actualizado y tipado.
    - Pantalla de grupo AttendanceSheet.tsx con badges de morosidad/deuda de cuota y estado de ficha médica.
    - Exclusión de alumnos dados de baja del llamado diario con selector opcional Ver dados de baja.
+
+### Requerimiento de Alcance de Asistencias (2026-09-11):
+- "Las asistencias solo importan las de los profesores roberto, santiago y sebastian, lo de rocio solo es para hacer el seguimiento de los pagos"
+
+### Solución Implementada:
+- `lib/attendanceDb.ts`: Filtrado para excluir a Rocío de las consultas de asistencias, profesores y alumnos (`LOWER(t.name) NOT LIKE '%rocio%'`). El módulo `/asistencias` ahora muestra con exactitud los 42 alumnos y 194 asistencias de Roberto, Santiago y Sebastián sin distorsión de KPIs.
+- `academia`: Dashboard adaptado para Rocío bajo el rol `💳 Seguimiento de Pagos`, permitiéndole auditar alumnos y estados de deuda sin requerir toma de lista.
+- `akds-dashboard`: En `/cobros` y `/alumnos` se mantiene intacto el 100% de los alumnos de torneos/adultos que gestiona Rocío para el control de cuotas y saldos.

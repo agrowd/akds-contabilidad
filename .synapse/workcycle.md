@@ -20,9 +20,13 @@
 - [x] **Cruza de Datos y Sincronización Automática**:
   - Algoritmo de cruce por `academia_id` y matching de nombres normalizado (Jaccard).
   - Botón `🔄 Sync Academia` en el CRM y acción `syncStudentsWithAcademiaAction`.
+- [x] **Filtrado de Asistencias (Profesores Roberto, Santiago y Sebastián vs Rocío para Pagos)**:
+  - En `lib/attendanceDb.ts`, consultas filtradas para excluir a Rocío (`WHERE LOWER(t.name) NOT LIKE '%rocio%' AND LOWER(t.username) NOT LIKE '%rocio%'`).
+  - Ahora `/asistencias` computa con precisión exacta los 42 alumnos y 194 asistencias de los 3 profesores activos, sin distorsión de KPIs.
+  - En `academia`, panel adaptado para Rocío bajo el rol de `💳 Seguimiento de Pagos`, permitiéndole auditar estados contables y deudas sin llamados de lista vacíos.
 - [x] **Build & Deploy**:
-  - `akds-dashboard` compilado con 0 errores y pusheado a `agrowd/akds-contabilidad`.
-  - `academia` compilado con 0 errores y pusheado a `agrowd/academia-andar`.
+  - `akds-dashboard` compilado con 0 errores y pusheado a `agrowd/akds-contabilidad` (`commit 0c9b93e`).
+  - `academia` compilado con 0 errores y pusheado a `agrowd/academia-andar` (`commit beddc66`).
 
 ### Estado Actual:
 Ambos sistemas sincronizados en producción y funcionando armónicamente.
