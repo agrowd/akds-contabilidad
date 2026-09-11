@@ -69,11 +69,13 @@ export async function fetchAttendanceData() {
       FROM "Attendance" a
       JOIN "Student" s ON a."studentId" = s.id
       JOIN "Teacher" t ON s."teacherId" = t.id
+      WHERE LOWER(t.name) NOT LIKE '%rocio%' AND LOWER(t.username) NOT LIKE '%rocio%'
       ORDER BY a.date DESC, s.name ASC
     `),
     pool.query(`
       SELECT id, name, username, role
       FROM "Teacher"
+      WHERE LOWER(name) NOT LIKE '%rocio%' AND LOWER(username) NOT LIKE '%rocio%'
       ORDER BY name ASC
     `),
     pool.query(`
@@ -86,6 +88,7 @@ export async function fetchAttendanceData() {
         t.name as teacher_name
       FROM "Student" s
       JOIN "Teacher" t ON s."teacherId" = t.id
+      WHERE LOWER(t.name) NOT LIKE '%rocio%' AND LOWER(t.username) NOT LIKE '%rocio%'
       ORDER BY s.name ASC
     `),
     pool.query(`

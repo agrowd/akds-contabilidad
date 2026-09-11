@@ -409,7 +409,7 @@ export default function AsistenciasUI({
         <div>
           <h1 className="page-title">📅 Control de Asistencias</h1>
           <p className="page-subtitle">
-            Indicador visual de asistencias: visualiza en <strong>verde cuando asistió</strong> y en <strong>rojo el día que estuvo ausente</strong> con diseño de matriz.
+            Seguimiento de asistencias de la Academia (Profesores: <strong>Roberto, Santiago y Sebastián</strong>). Los grupos de torneos y adultos de Rocío se gestionan en <strong>Cobros</strong> para el control de pagos.
           </p>
         </div>
         <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
