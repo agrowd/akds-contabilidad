@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo } from 'react';
 import Link from 'next/link';
+import BirthdayCalendar from './BirthdayCalendar';
 
 interface Student {
   id: number;
@@ -11,6 +12,7 @@ interface Student {
   status: string;
   enrollment_date: string;
   period_end_date?: string;
+  birth_date?: string;
 }
 
 interface Debtor {
@@ -100,17 +102,22 @@ export default function DashboardUI({
 
       {/* CATEGORIES + REVENUE BREAKDOWN */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '2rem' }}>
-        {/* Categories */}
-        <div className="glass" style={{ padding: '1.25rem 1.5rem' }}>
-          <h3 className="section-title">👥 Alumnos por Categoría</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            {categories.map(cat => (
-              <div key={cat.category} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0', borderBottom: '1px solid var(--card-border)' }}>
-                <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{cat.category}</span>
-                <span className="badge badge-secondary">{cat.count}</span>
-              </div>
-            ))}
+        {/* Categories + Birthday Calendar */}
+        <div>
+          <div className="glass" style={{ padding: '1.25rem 1.5rem' }}>
+            <h3 className="section-title">👥 Alumnos por Categoría</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {categories.map(cat => (
+                <div key={cat.category} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0', borderBottom: '1px solid var(--card-border)' }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{cat.category}</span>
+                  <span className="badge badge-secondary">{cat.count}</span>
+                </div>
+              ))}
+            </div>
           </div>
+
+          {/* Birthday Calendar placed right below categories in the designated area */}
+          <BirthdayCalendar students={students} />
         </div>
 
         {/* Revenue by Rubro */}

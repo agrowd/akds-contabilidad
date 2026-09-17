@@ -27,7 +27,7 @@ export default async function DashboardPage() {
 
   // 3. STUDENTS
   const students = await db.all(`
-    SELECT s.id, s.name, s.category, s.status, s.enrollment_date, s.period_end_date,
+    SELECT s.id, s.name, s.category, s.status, s.enrollment_date, s.period_end_date, s.birth_date,
            (SELECT COALESCE(SUM(amount_paid), 0) FROM payments p WHERE p.student_id = s.id) as total_paid
     FROM students s
     ORDER BY s.name

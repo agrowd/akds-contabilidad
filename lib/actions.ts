@@ -123,7 +123,15 @@ export async function addStudent(formData: {
         }
     }
 
+    // Auto-sync new student to Academia counter database
+    try {
+        await syncStudentsWithAcademiaAction();
+    } catch (syncErr) {
+        console.error('Error auto-syncing student to Academia:', syncErr);
+    }
+
     revalidatePath('/alumnos');
+    revalidatePath('/asistencias');
     return { success: true, id: studentId };
   } catch (error: any) {
     console.error('Error adding student:', error);
@@ -354,7 +362,15 @@ export async function updateStudent(id: number, data: any) {
         const fields = Object.keys(data).map((k: string) => `${k} = ?`).join(', ');
         const values = [...Object.values(data), id];
         await db.run(`UPDATE students SET ${fields} WHERE id = ?`, values);
+
+        try {
+            await syncStudentsWithAcademiaAction();
+        } catch (syncErr) {
+            console.error('Error syncing updated student to Academia:', syncErr);
+        }
+
         revalidatePath('/alumnos');
+        revalidatePath('/asistencias');
         return { success: true };
     } catch (error: any) {
         return { success: false, error: error.message };
@@ -362,24 +378,85 @@ export async function updateStudent(id: number, data: any) {
 }
 
 /**
- * Deletes a student and all their related records (payments, status).
+ * Deletes a student and all their related records (payments, status, charges)
+ * from both CRM SQLite and Academia Neon Postgres DB.
  */
 export async function deleteStudent(id: number) {
     const db = await getDb();
     try {
+        const student = await db.get('SELECT academia_id, name FROM students WHERE id = ?', [id]);
+
         await db.run('BEGIN TRANSACTION');
         await db.run(`DELETE FROM monthly_status WHERE student_id = ?`, [id]);
         await db.run(`DELETE FROM payments WHERE student_id = ?`, [id]);
+        await db.run(`DELETE FROM student_extra_charges WHERE student_id = ?`, [id]).catch(() => {});
         await db.run(`DELETE FROM students WHERE id = ?`, [id]);
         await db.run('COMMIT');
 
+        if (student) {
+            try {
+                const { getAttendancePool } = await import('./attendanceDb');
+                const acPool = getAttendancePool();
+                if (student.academia_id) {
+                    await acPool.query(`DELETE FROM "Attendance" WHERE "studentId" = $1`, [student.academia_id]);
+                    await acPool.query(`DELETE FROM "Student" WHERE id = $1`, [student.academia_id]);
+                }
+                if (student.name) {
+                    const acRes = await acPool.query(`SELECT id FROM "Student" WHERE LOWER(name) = LOWER($1)`, [student.name]);
+                    for (const row of acRes.rows) {
+                        await acPool.query(`DELETE FROM "Attendance" WHERE "studentId" = $1`, [row.id]);
+                        await acPool.query(`DELETE FROM "Student" WHERE id = $1`, [row.id]);
+                    }
+                }
+            } catch (acErr) {
+                console.error('Error deleting student from Academia DB:', acErr);
+            }
+        }
+
         revalidatePath('/alumnos');
+        revalidatePath('/asistencias');
         revalidatePath('/cobros');
         revalidatePath('/');
         return { success: true };
     } catch (error: any) {
         await db.run('ROLLBACK');
         console.error('Error deleting student:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Deletes an Academia student directly by their UUID or CRM ID.
+ */
+export async function deleteAcademiaStudentAction(academiaId: string) {
+    try {
+        const { getAttendancePool } = await import('./attendanceDb');
+        const acPool = getAttendancePool();
+        const db = await getDb();
+
+        const acRes = await acPool.query(`SELECT id, crm_id, name FROM "Student" WHERE id = $1`, [academiaId]);
+        const acStudent = acRes.rows[0];
+
+        if (acStudent?.crm_id) {
+            await deleteStudent(acStudent.crm_id);
+        } else {
+            if (acStudent?.name) {
+                const crmStudent = await db.get(`SELECT id FROM students WHERE LOWER(name) = LOWER(?)`, [acStudent.name]);
+                if (crmStudent?.id) {
+                    await deleteStudent(crmStudent.id);
+                }
+            }
+            await acPool.query(`DELETE FROM "Attendance" WHERE "studentId" = $1`, [academiaId]);
+            await acPool.query(`DELETE FROM "Student" WHERE id = $1`, [academiaId]);
+        }
+
+        revalidatePath('/asistencias');
+        revalidatePath('/alumnos');
+        revalidatePath('/cobros');
+        revalidatePath('/');
+        return { success: true };
+    } catch (error: any) {
+        console.error('Error deleting academia student:', error);
         return { success: false, error: error.message };
     }
 }
@@ -436,11 +513,39 @@ function matchScore(tokensA: string[], tokensB: string[]): number {
   return intersection / union;
 }
 
+function resolveCategoryYear(cStudent: { birth_date?: string; category?: string; group_name?: string; notes?: string }): number {
+    if (cStudent.birth_date) {
+        const bYear = new Date(cStudent.birth_date).getFullYear();
+        if (bYear >= 2010 && bYear <= 2030) return bYear;
+    }
+    const text = `${cStudent.category || ''} ${cStudent.group_name || ''} ${cStudent.notes || ''}`;
+    const match = text.match(/\b(201[0-9]|202[0-9]|203[0-9])\b/);
+    if (match) {
+        return parseInt(match[1], 10);
+    }
+    return 2016;
+}
+
+function resolveTeacherIdForCategory(catYear: number, teachers: any[]): string {
+    const rober = teachers.find(t => t.name.toLowerCase().includes('rober')) || teachers[0];
+    const sebastian = teachers.find(t => t.name.toLowerCase().includes('sebastian')) || teachers[0];
+    const santiago = teachers.find(t => t.name.toLowerCase().includes('santiago')) || teachers[0];
+
+    if (catYear <= 2016) {
+        return rober?.id || '86ed908e-0e8d-4305-99cf-7f9eb8c0a281';
+    } else if (catYear === 2017 || catYear === 2018) {
+        return sebastian?.id || 'def350e5-cd36-4cd4-8b55-fbc82435d7db';
+    } else {
+        return santiago?.id || '157b2ac4-ff1c-446d-96a5-0f34d5dfd5e0';
+    }
+}
+
 /**
  * Synchronizes CRM students with Academia DB:
  * - Computes debt and overdue statuses and pushes them to Academia
  * - Computes medical certificate validity and pushes status
  * - Pushes active / baja / suspendidio status
+ * - Automatically assigns teacher based on category year (Rober: <=2016, Sebastian: 2017-2018, Santiago: >=2019)
  * - Creates missing infant students in Academia so the rosters match
  */
 export async function syncStudentsWithAcademiaAction() {
@@ -450,7 +555,7 @@ export async function syncStudentsWithAcademiaAction() {
 
     try {
         const crmStudents = await db.all(`
-            SELECT id, name, category, status, monthly_quota, phone, birth_date, medical_certificate_date, academia_id 
+            SELECT id, name, category, group_name, notes, status, monthly_quota, phone, birth_date, medical_certificate_date, academia_id 
             FROM students 
             ORDER BY name ASC
         `);
@@ -482,9 +587,9 @@ export async function syncStudentsWithAcademiaAction() {
         const acRes = await acPool.query(`SELECT id, name, category, turno, "teacherId", status FROM "Student"`);
         const acStudents = acRes.rows;
 
-        // Default teacher (Rober or Santiago if needed)
+        // Active teachers
         const teachersRes = await acPool.query(`SELECT id, name FROM "Teacher"`);
-        const defaultTeacherId = teachersRes.rows[0]?.id || '86ed908e-0e8d-4305-99cf-7f9eb8c0a281';
+        const activeTeachers = teachersRes.rows;
 
         let updatedCount = 0;
         let createdCount = 0;
@@ -493,6 +598,9 @@ export async function syncStudentsWithAcademiaAction() {
             const sid = Number(cStudent.id);
             const stMap = statusMap[sid] || {};
             
+            const catYear = resolveCategoryYear(cStudent);
+            const targetTeacherId = resolveTeacherIdForCategory(catYear, activeTeachers);
+
             // Calculate Debt Status
             let unpaidMonths: string[] = [];
             let hasPartial = false;
@@ -557,7 +665,7 @@ export async function syncStudentsWithAcademiaAction() {
             const studentStatus = cStudent.status === 'BAJA' ? 'BAJA' : (cStudent.status === 'SUSPENDIDO' ? 'SUSPENDIDO' : 'ACTIVE');
 
             if (matchedAc) {
-                // Update Academia Student
+                // Update Academia Student (Preserve existing teacherId and category in Neon DB)
                 await acPool.query(
                     `UPDATE "Student" 
                      SET status = $1, debt_status = $2, debt_details = $3, medical_certificate_status = $4, crm_id = $5, "birthDate" = COALESCE($6, "birthDate") 
@@ -579,11 +687,6 @@ export async function syncStudentsWithAcademiaAction() {
                 updatedCount++;
             } else if (cStudent.category && !cStudent.category.toUpperCase().includes('ADULTO')) {
                 // Auto create in Academia for infant/juvenile categories if not exists
-                let catYear = 2016;
-                if (cStudent.birth_date) {
-                    const bYear = new Date(cStudent.birth_date).getFullYear();
-                    if (bYear >= 2010 && bYear <= 2026) catYear = bYear;
-                }
                 const newId = (await import('crypto')).randomUUID();
                 await acPool.query(
                     `INSERT INTO "Student" (id, name, category, turno, "teacherId", status, debt_status, debt_details, medical_certificate_status, crm_id, "birthDate") 
@@ -593,7 +696,7 @@ export async function syncStudentsWithAcademiaAction() {
                         cStudent.name,
                         catYear,
                         '1° turno',
-                        defaultTeacherId,
+                        targetTeacherId,
                         studentStatus,
                         debtStatus,
                         debtDetails,

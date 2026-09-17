@@ -3,6 +3,7 @@
 import React, { useState, useMemo } from 'react';
 import { AttendanceRecordItem, AttendanceTeacherItem, AttendanceStudentItem, AttendanceNoteItem } from '@/lib/attendanceDb';
 import { exportToExcel, exportToPDF } from '@/lib/export';
+import { syncStudentsWithAcademiaAction, deleteAcademiaStudentAction } from '@/lib/actions';
 
 interface AsistenciasUIProps {
   initialRecords: AttendanceRecordItem[];
@@ -402,6 +403,28 @@ export default function AsistenciasUI({
     }
   };
 
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [deletingStudentId, setDeletingStudentId] = useState<string | null>(null);
+
+  const handleSync = async () => {
+    setIsSyncing(true);
+    const res = await syncStudentsWithAcademiaAction();
+    setIsSyncing(false);
+    alert(res.message || (res.success ? 'Sincronización de alumnos y profesores completada.' : 'Error: ' + res.error));
+  };
+
+  const handleDeleteStudent = async (studentId: string, studentName: string) => {
+    if (!confirm(`¿Estás seguro de que deseas eliminar permanentemente a ${studentName}?\n\nEsta acción eliminará al alumno de la lista del profesor y del CRM.`)) {
+      return;
+    }
+    setDeletingStudentId(studentId);
+    const res = await deleteAcademiaStudentAction(studentId);
+    setDeletingStudentId(null);
+    if (!res.success) {
+      alert('Error al eliminar alumno: ' + res.error);
+    }
+  };
+
   return (
     <div className="animate-in">
       {/* Page Header */}
@@ -413,6 +436,15 @@ export default function AsistenciasUI({
           </p>
         </div>
         <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={handleSync}
+            disabled={isSyncing}
+            className="btn btn-primary"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+          >
+            {isSyncing ? '🔄 Sincronizando...' : '🔄 Sincronizar Alumnos & Profesores'}
+          </button>
           <button
             type="button"
             onClick={handleExportExcel}
@@ -901,6 +933,7 @@ export default function AsistenciasUI({
                     <th style={{ width: '80px', textAlign: 'center' }}>Pres.</th>
                     <th style={{ width: '80px', textAlign: 'center' }}>Faltas</th>
                     <th style={{ width: '150px' }}>% Asistencia</th>
+                    <th style={{ width: '80px', textAlign: 'center' }}>Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1020,6 +1053,26 @@ export default function AsistenciasUI({
                               {s.rate}%
                             </span>
                           </div>
+                        </td>
+
+                        {/* Delete Action */}
+                        <td style={{ textAlign: 'center' }}>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteStudent(s.id, s.name)}
+                            disabled={deletingStudentId === s.id}
+                            className="btn btn-secondary"
+                            style={{
+                              padding: '0.25rem 0.5rem',
+                              fontSize: '0.75rem',
+                              color: 'var(--danger-soft)',
+                              borderColor: 'rgba(239, 68, 68, 0.3)',
+                              background: 'rgba(239, 68, 68, 0.05)',
+                            }}
+                            title="Eliminar alumno de la academia y CRM"
+                          >
+                            {deletingStudentId === s.id ? '...' : '🗑️'}
+                          </button>
                         </td>
                       </tr>
                     );
